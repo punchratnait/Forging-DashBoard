@@ -256,7 +256,7 @@
       key into the two constants below.
    ========================================================================= */
 const SUPABASE_URL = 'https://dneaugurejuqcubfbwij.supabase.co/rest/v1/';
-const SUPABASE_ANON_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuZWF1Z3VyZWp1cWN1YmZid2lqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNDIzMDQsImV4cCI6MjEwMTcxODMwNH0.SWQN85VkfjALNMiQPAVKfZLG1YRNo7ovasd4SGuTpxM;
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuZWF1Z3VyZWp1cWN1YmZid2lqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNDIzMDQsImV4cCI6MjEwMTcxODMwNH0.SWQN85VkfjALNMiQPAVKfZLG1YRNo7ovasd4SGuTpxM';
 const CONFIGURED = !SUPABASE_URL.startsWith('YOUR_') && !SUPABASE_ANON_KEY.startsWith('YOUR_');
 const supabaseClient = CONFIGURED ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
