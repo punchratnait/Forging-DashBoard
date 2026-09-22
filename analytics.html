@@ -1,0 +1,840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>PRF Manufacturing — Analytics</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  :root {
+    --navy: #0f3557; --navy-2: #164a74; --accent: #2f8fd8; --accent-2: #5cb3e8;
+    --green: #2fae6b; --amber: #e0a52f; --red: #d5493b;
+    --bg: #eef2f6; --panel: #ffffff; --line: #e2e8ef; --ink: #1c2b3a; --ink-dim: #64748b;
+    --shadow: 0 4px 18px rgba(15,53,87,0.08), 0 1px 3px rgba(15,53,87,0.06);
+  }
+  * { box-sizing: border-box; margin:0; padding:0; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background: var(--bg); color: var(--ink);
+    padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0f1720; --panel:#16202b; --line:#243040; --ink:#e8edf3; --ink-dim:#8a97a8;
+      --shadow: 0 4px 18px rgba(0,0,0,0.35), 0 1px 3px rgba(0,0,0,0.25);
+    }
+  }
+  .topbar { background: linear-gradient(135deg, var(--navy), var(--navy-2)); color: #fff; padding: 22px 28px; }
+  .topbar-eyebrow { font-size: 12px; letter-spacing: 0.08em; opacity: 0.75; margin-bottom: 4px; }
+  .topbar h1 { font-size: 24px; font-weight: 700; }
+  .topbar-row { display:flex; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+  .logout-btn { background: rgba(255,255,255,0.12); color:#fff; border:none; padding:7px 14px; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; }
+  .tabs { display: flex; gap: 4px; background: rgba(255,255,255,0.08); margin-top: 16px; border-radius: 8px; padding: 4px; width: fit-content; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { flex-shrink: 0; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; color: rgba(255,255,255,0.65); cursor: pointer; border: none; background: none; font-family: inherit; transition: background .15s, color .15s; }
+  .tab.active { background: #fff; color: var(--navy); }
+  .tab:not(.active):hover { background: rgba(255,255,255,0.12); color: #fff; }
+  .plant-bar { display: flex; align-items: center; gap: 10px; margin: 16px 0 20px; flex-wrap: wrap; }
+  .plant-label { font-size: 11.5px; color: var(--ink-dim); letter-spacing: 0.04em; text-transform: uppercase; margin-right: 4px; }
+  .plant-tabs { display: flex; gap: 4px; background: var(--panel); border-radius: 8px; padding: 4px; box-shadow: var(--shadow); }
+  .plant-tab { padding: 7px 16px; border-radius: 6px; font-size: 12.5px; font-weight: 700; color: var(--ink-dim); cursor: pointer; border: none; background: none; font-family: inherit; }
+  .plant-tab.active { background: var(--accent); color: #fff; }
+  .range-select { padding: 7px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 600; border: 1px solid var(--line); background: var(--panel); color: var(--ink); box-shadow: var(--shadow); }
+  .wrap { max-width: 1240px; margin: 0 auto; padding: 0 24px 24px; }
+  .tabpanel { display: none; }
+  .tabpanel.active { display: block; }
+  .kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
+  .kpi-row.four { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1000px) { .kpi-row, .kpi-row.four { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .kpi-row, .kpi-row.four { grid-template-columns: 1fr; } }
+  .kpi-card { background: var(--panel); border-radius: 10px; padding: 18px; box-shadow: var(--shadow); border-top: 3px solid var(--accent); }
+  .kpi-card.warn { border-top-color: var(--amber); }
+  .kpi-card.bad { border-top-color: var(--red); }
+  .kpi-card.good { border-top-color: var(--green); }
+  .kpi-value { font-size: 26px; font-weight: 800; color: var(--navy); }
+  @media (prefers-color-scheme: dark) { .kpi-value { color: var(--accent-2); } }
+  .kpi-label { font-size: 12.5px; color: var(--ink-dim); margin-top: 4px; }
+  .grid-2 { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  @media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border-radius: 10px; padding: 18px; box-shadow: var(--shadow); }
+  .panel h3 { font-size: 14.5px; font-weight: 700; margin-bottom: 14px; }
+  .chart-box { position: relative; height: 260px; }
+  .chart-box.tall { height: 300px; }
+  .legend-row { display: flex; gap: 16px; margin-top: 10px; flex-wrap: wrap; font-size: 12px; color: var(--ink-dim); }
+  .legend-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+  .note { background: rgba(47,143,216,0.08); border: 1px solid rgba(47,143,216,0.25); border-radius: 8px; padding: 12px 16px; font-size: 12.5px; color: var(--ink-dim); margin-bottom: 4px; }
+  .note b { color: var(--ink); }
+  .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 560px; }
+  th { text-align: left; font-size: 11px; letter-spacing: 0.04em; color: var(--ink-dim); padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  .pill { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 11.5px; font-weight: 700; }
+  .pill.bad { background: rgba(213,73,59,0.12); color: var(--red); }
+  .pill.warn { background: rgba(224,165,47,0.14); color: #a87816; }
+  .pill.good { background: rgba(47,174,107,0.12); color: var(--green); }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+  .cal-cell { aspect-ratio: 1; border-radius: 4px; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:#fff; cursor:default; }
+  .cal-dow { text-align:center; font-size:10.5px; color:var(--ink-dim); padding-bottom:4px; }
+  .anomaly-card { display:flex; align-items:flex-start; gap:12px; padding:12px 14px; border-radius:8px; margin-bottom:10px; border-left:4px solid; }
+  .anomaly-card.bad { background: rgba(213,73,59,0.07); border-color: var(--red); }
+  .anomaly-card.warn { background: rgba(224,165,47,0.08); border-color: var(--amber); }
+  .anomaly-card.good { background: rgba(47,174,107,0.07); border-color: var(--green); }
+  .anomaly-icon { font-size:18px; line-height:1; }
+  .anomaly-text b { display:block; font-size:13px; margin-bottom:2px; }
+  .anomaly-text span { font-size:12px; color: var(--ink-dim); }
+
+  /* Login screen */
+  .login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+  .login-card { background: var(--panel); border-radius: 12px; padding: 32px; box-shadow: var(--shadow); max-width: 360px; width:100%; }
+  .login-card h1 { font-size: 20px; margin-bottom: 4px; color: var(--navy); }
+  @media (prefers-color-scheme: dark) { .login-card h1 { color: var(--accent-2); } }
+  .login-card p { font-size: 12.5px; color: var(--ink-dim); margin-bottom: 20px; }
+  .login-field { margin-bottom: 14px; }
+  .login-field label { display:block; font-size:11.5px; color:var(--ink-dim); margin-bottom:5px; text-transform:uppercase; letter-spacing:0.04em; }
+  .login-field input { width:100%; padding:10px 12px; border-radius:6px; border:1px solid var(--line); background:var(--bg); color:var(--ink); font-size:14px; }
+  .login-btn { width:100%; padding:11px; border-radius:6px; border:none; background:var(--accent); color:#fff; font-weight:700; font-size:14px; cursor:pointer; margin-top:6px; }
+  .login-err { color: var(--red); font-size:12.5px; margin-top:10px; }
+  .loading-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; color:var(--ink-dim); font-size:13px; }
+  .err-banner { background:#fde8e6; border:1px solid #d5493b; color:#8a2f24; border-radius:8px; padding:14px 18px; margin-bottom:16px; font-size:13px; font-family:monospace; white-space:pre-wrap; }
+
+  @media (max-width: 640px) {
+    .topbar { padding: 16px 16px; }
+    .topbar h1 { font-size: 19px; }
+    .wrap { padding: 16px; }
+    .kpi-value { font-size: 21px; }
+    .kpi-card { padding: 14px; }
+    .panel { padding: 14px; }
+    .panel h3 { font-size: 13px; }
+    .chart-box { height: 210px; }
+    .chart-box.tall { height: 240px; }
+    .plant-bar { gap: 8px; }
+    .plant-tab { padding: 6px 12px; font-size: 11.5px; }
+    table { min-width: 480px; font-size: 12px; }
+    th, td { padding: 7px 8px; }
+  }
+</style>
+</head>
+<body>
+<div id="app"><div class="loading-wrap">Loading…</div></div>
+
+<script>
+if(typeof Chart === 'undefined' || typeof window.supabase === 'undefined'){
+  document.getElementById('app').innerHTML = '<div class="loading-wrap">A required script failed to load from the CDN. Please refresh.</div>';
+  throw new Error('Required library not loaded');
+}
+
+// =========================================================================
+// SUPABASE — same project as the main app, read-only usage here
+// =========================================================================
+const SUPABASE_URL = 'https://dneaugurejuqcubfbwij.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRuZWF1Z3VyZWp1cWN1YmZid2lqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYxNDIzMDQsImV4cCI6MjEwMTcxODMwNH0.SWQN85VkfjALNMiQPAVKfZLG1YRNo7ovasd4SGuTpxM';
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+async function sha256(text){
+  const enc = new TextEncoder().encode(text);
+  const buf = await crypto.subtle.digest('SHA-256', enc);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
+}
+
+let DB = { users:[], machines:[], items:[], spm:[], locations:[], sites:[], shifts:[], reasons:[], entries:[] };
+let SESSION = null;
+
+async function loadAll(){
+  const { data, error } = await supabaseClient.from('kv_store').select('key,value');
+  if(error){ throw new Error('kv_store load failed: ' + error.message); }
+  const map = {};
+  (data||[]).forEach(row=>{ map[row.key] = row.value; });
+  DB.users = map['prf_users'] || [];
+  DB.machines = map['prf_machines'] || [];
+  DB.items = map['prf_items'] || [];
+  DB.spm = map['prf_machine_item_spm'] || [];
+  DB.locations = map['prf_locations'] || [];
+  DB.sites = map['prf_sites'] || [];
+  DB.shifts = map['prf_shifts'] || [];
+  DB.reasons = map['prf_downtime_reasons'] || [];
+
+  const { data: entryRows, error: entryErr } = await supabaseClient.from('prf_entries_v2').select('*');
+  if(entryErr){ throw new Error('entries load failed: ' + entryErr.message); }
+  DB.entries = (entryRows||[]).map(row=>({
+    id: row.id, date: row.date, shiftId: row.shift_id, siteId: row.site_id,
+    locationId: row.location_id, machineId: row.machine_id, itemId: row.item_id,
+    spm: row.spm, qty: row.qty, weight: row.weight, rejectedQty: row.rejected_qty,
+    downtimeMinutes: row.downtime_minutes, downtimeBlocks: row.downtime_blocks || [],
+    operatorName: row.operator_name, supervisorId: row.supervisor_id, supervisorName: row.supervisor_name,
+    createdAt: row.created_at
+  }));
+}
+
+// =========================================================================
+// Shared calculation helpers — mirrors the main app's formulas exactly
+// =========================================================================
+function byId(arr,id){ return arr.find(x=>x.id===id); }
+function nameOf(arr,id){ const o=byId(arr,id); return o ? o.name : '—'; }
+function machineDepartment(m){ return (m && m.department) || 'forging'; }
+function safeDiv(a,b){ return b>0 ? a/b : 0; }
+function machineLabel(id){ const m=byId(DB.machines,id); if(!m) return '—'; return m.machineCode || m.name; }
+function itemLabel(item){
+  if(!item) return '';
+  const text = (item.description && item.description.trim()) ? item.description : (item.name || '');
+  return item.itemCode ? `${item.itemCode} — ${text}` : text;
+}
+function entryWeightGrams(e){
+  const item = byId(DB.items, e.itemId);
+  const wpp = item ? Number(item.weightPerPiece)||0 : 0;
+  if(wpp > 0) return (Number(e.qty)||0) * wpp;
+  return Number(e.weight)||0;
+}
+function entryCalc(e){
+  const shift = byId(DB.shifts, e.shiftId);
+  const breakMin = shift ? Number(shift.breakMinutes)||0 : 0;
+  const available = shift ? Math.max((Number(shift.durationMinutes)||0) - breakMin, 0) : 0;
+  const rawDowntime = Number(e.downtimeMinutes)||0;
+  const downtime = Math.min(rawDowntime, available);
+  const runTime = Math.max(available - downtime, 0);
+  const spm = Number(e.spm)||0;
+  const qty = Number(e.qty)||0;
+  const rejected = Number(e.rejectedQty)||0;
+  const standardQty = spm * available;
+  const goodQty = Math.max(qty - rejected, 0);
+  return { available, downtime, runTime, standardQty, goodQty };
+}
+function aggregate(entries){
+  if(entries.length===0) return { oeePct:0, downtimePct:0, totalQty:0, totalWeightKg:0, totalRejected:0, availPct:0, perfPct:0, qualPct:0 };
+  let sumStd=0, sumQty=0, sumAvail=0, sumRun=0, sumGood=0, sumDown=0, sumWeightG=0, sumRejected=0;
+  entries.forEach(e=>{
+    const c = entryCalc(e);
+    sumStd += c.standardQty; sumQty += Number(e.qty)||0; sumAvail += c.available;
+    sumRun += c.runTime; sumGood += c.goodQty; sumDown += c.downtime;
+    sumWeightG += entryWeightGrams(e); sumRejected += Number(e.rejectedQty)||0;
+  });
+  const availability = Math.min(safeDiv(sumRun, sumAvail), 1);
+  const performance = Math.min(safeDiv(sumQty, sumStd), 1);
+  const quality = sumQty>0 ? Math.min(safeDiv(sumGood, sumQty), 1) : 1;
+  const oeePct = availability * performance * quality * 100;
+  const downtimePct = safeDiv(sumDown, sumAvail) * 100;
+  return { oeePct, downtimePct, totalQty:sumQty, totalWeightKg:sumWeightG/1000, totalRejected:sumRejected,
+    availPct: availability*100, perfPct: performance*100, qualPct: quality*100, totalDowntime: sumDown };
+}
+function inRange(date, start, end){ return date >= start && date <= end; }
+function todayStr(){ const d=new Date(); return d.toISOString().slice(0,10); }
+function daysAgoStr(n){ const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); }
+function monthStartStr(){ const d=new Date(); return d.toISOString().slice(0,8)+'01'; }
+function fmt1(n){ return (Math.round((Number(n)||0)*10)/10).toLocaleString(); }
+
+// =========================================================================
+// Auth — reuses the same prf_users table and password hashing as the main app.
+// Restricted to admin/head/management roles (the audience for analytics).
+// =========================================================================
+function renderLogin(err){
+  document.getElementById('app').innerHTML = `
+    <div class="login-wrap">
+      <div class="login-card">
+        <h1>PRF Analytics</h1>
+        <p>Sign in with your existing Dashboard account. Restricted to Admin, Head, and Management roles.</p>
+        <form id="loginForm">
+          <div class="login-field"><label>User ID</label><input type="text" id="loginId" autocomplete="username" required></div>
+          <div class="login-field"><label>Password</label><input type="password" id="loginPw" autocomplete="current-password" required></div>
+          <button class="login-btn" type="submit">Sign In</button>
+        </form>
+        ${err ? `<div class="login-err">${err}</div>` : ''}
+      </div>
+    </div>`;
+  document.getElementById('loginForm').onsubmit = async (ev)=>{
+    ev.preventDefault();
+    const id = document.getElementById('loginId').value.trim();
+    const pw = document.getElementById('loginPw').value;
+    const user = DB.users.find(u=>u.id===id || u.name===id);
+    if(!user){ renderLogin('Account not found.'); return; }
+    if(!['admin','head','management'].includes(user.role)){ renderLogin('This analytics view is limited to Admin, Head, and Management accounts.'); return; }
+    const hash = await sha256(pw);
+    if(hash !== user.passwordHash){ renderLogin('Incorrect password.'); return; }
+    SESSION = user;
+    sessionStorage.setItem('prf_analytics_session', user.id);
+    renderApp();
+  };
+}
+
+// =========================================================================
+// App shell + tab/plant switching (structure mirrors the preview build)
+// =========================================================================
+let currentTab = 'overview';
+let currentPlant = 'consolidated';
+let currentRangeMode = 'mtd';
+const charts = {};
+function destroyChart(id){ if(charts[id]){ charts[id].destroy(); delete charts[id]; } }
+function mkChart(id, config){ const el=document.getElementById(id); if(!el) return; destroyChart(id); charts[id] = new Chart(el, config); return charts[id]; }
+function tierPill(v){ if(v<60) return `<span class="pill bad">${fmt1(v)}%</span>`; if(v<85) return `<span class="pill warn">${fmt1(v)}%</span>`; return `<span class="pill good">${fmt1(v)}%</span>`; }
+function tierPillReject(v){ if(v>4) return `<span class="pill bad">${fmt1(v)}%</span>`; if(v>2.5) return `<span class="pill warn">${fmt1(v)}%</span>`; return `<span class="pill good">${fmt1(v)}%</span>`; }
+
+function currentDateRange(){
+  const end = todayStr();
+  if(currentRangeMode==='mtd') return { start: monthStartStr(), end };
+  if(currentRangeMode==='30d') return { start: daysAgoStr(30), end };
+  return { start: daysAgoStr(14), end };
+}
+function scopedEntries(){
+  let rows = DB.entries;
+  if(currentPlant !== 'consolidated') rows = rows.filter(e=>e.locationId===currentPlant);
+  const {start,end} = currentDateRange();
+  return rows.filter(e=>inRange(e.date, start, end));
+}
+
+const renderFns = {};
+renderFns.overview = function(){
+  const entries = scopedEntries();
+  const agg = aggregate(entries);
+  const machinesInScope = currentPlant==='consolidated'
+    ? DB.machines.filter(m=>machineDepartment(m)==='forging')
+    : DB.machines.filter(m=>machineDepartment(m)==='forging' && m.location===currentPlant);
+  const byMachine = {};
+  entries.forEach(e=>{ (byMachine[e.machineId] = byMachine[e.machineId]||[]).push(e); });
+  const machineRows = machinesInScope.map(m=>{
+    const a = aggregate(byMachine[m.id]||[]);
+    return { code: m.machineCode||m.name, oee: a.oeePct };
+  }).filter(r=>byMachine!==undefined);
+  const belowTarget = machineRows.filter(r=>r.oee>0 && r.oee<60).length;
+
+  document.getElementById('kpi-overview').innerHTML = `
+    <div class="kpi-card"><div class="kpi-value">${fmt1(agg.totalQty)}</div><div class="kpi-label">Qty Produced</div></div>
+    <div class="kpi-card warn"><div class="kpi-value">${fmt1(agg.totalRejected)}</div><div class="kpi-label">Rejected Qty</div></div>
+    <div class="kpi-card"><div class="kpi-value">${fmt1(agg.totalWeightKg/1000)} MT</div><div class="kpi-label">Total Weight</div></div>
+    <div class="kpi-card good"><div class="kpi-value">${fmt1(agg.oeePct)}%</div><div class="kpi-label">Avg OEE</div></div>
+    <div class="kpi-card bad"><div class="kpi-value">${belowTarget}</div><div class="kpi-label">Machines Below 60% OEE</div></div>
+  `;
+
+  // Daily trend
+  const {start,end} = currentDateRange();
+  const dateList = [];
+  for(let d=new Date(start); d<=new Date(end); d.setDate(d.getDate()+1)) dateList.push(d.toISOString().slice(0,10));
+  const byDate = {};
+  entries.forEach(e=>{ byDate[e.date] = (byDate[e.date]||0) + (Number(e.qty)||0); });
+  mkChart('c_trend', { type:'line', data:{ labels:dateList.map(d=>d.slice(5)), datasets:[{ data:dateList.map(d=>byDate[d]||0), borderColor:'#2f8fd8', backgroundColor:'rgba(47,143,216,0.12)', fill:true, tension:0.35, pointRadius:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, beginAtZero:true}} } });
+
+  // Plant/machine donut
+  const donutTitle = document.getElementById('h_plantDonut');
+  if(currentPlant === 'consolidated'){
+    donutTitle.textContent = 'Production by Plant';
+    const byLoc = {};
+    entries.forEach(e=>{ byLoc[e.locationId] = (byLoc[e.locationId]||0) + (Number(e.qty)||0); });
+    const locIds = Object.keys(byLoc);
+    mkChart('c_plantDonut', { type:'doughnut', data:{ labels:locIds.map(id=>nameOf(DB.locations,id)), datasets:[{ data:locIds.map(id=>byLoc[id]), backgroundColor:['#0f3557','#5cb3e8','#8fb8d9','#2f8fd8'], borderColor:'#fff', borderWidth:2 }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'62%', plugins:{legend:{position:'bottom', labels:{padding:16, boxWidth:10}}} } });
+  } else {
+    donutTitle.textContent = 'Production by Machine — ' + nameOf(DB.locations, currentPlant);
+    mkChart('c_plantDonut', { type:'doughnut', data:{ labels:machineRows.map(r=>r.code), datasets:[{ data:machinesInScope.map(m=>aggregate(byMachine[m.id]||[]).totalQty), backgroundColor:['#0f3557','#2f8fd8','#5cb3e8','#8fb8d9','#164a74'], borderColor:'#fff', borderWidth:2 }] },
+      options:{ responsive:true, maintainAspectRatio:false, cutout:'62%', plugins:{legend:{position:'bottom', labels:{padding:16, boxWidth:10}}} } });
+  }
+
+  mkChart('c_machineBar', { type:'bar', data:{ labels:machineRows.map(r=>r.code), datasets:[{ data:machineRows.map(r=>fmt1(r.oee)), backgroundColor:machineRows.map(r=>r.oee<60?'#d5493b':r.oee<85?'#e0a52f':'#2fae6b'), borderRadius:4 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, beginAtZero:true, max:100}} } });
+
+  const reasonMap = {};
+  entries.forEach(e=>{ (e.downtimeBlocks||[]).forEach(b=>{ const key=b.reasonId||'__unspecified'; reasonMap[key] = (reasonMap[key]||0) + (Number(b.minutes)||0); }); });
+  const reasonKeys = Object.keys(reasonMap).sort((a,b)=>reasonMap[b]-reasonMap[a]).slice(0,6);
+  mkChart('c_reasonPie', { type:'pie', data:{ labels:reasonKeys.map(k=>k==='__unspecified'?'Unspecified':nameOf(DB.reasons,k)), datasets:[{ data:reasonKeys.map(k=>reasonMap[k]), backgroundColor:['#0f3557','#2f8fd8','#5cb3e8','#e0a52f','#8fb8d9','#b8c4d0'], borderColor:'#fff', borderWidth:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{padding:10, boxWidth:10, font:{size:11}}}} } });
+
+  const poor = machineRows.filter(r=>r.oee>0 && r.oee<60).length, avg = machineRows.filter(r=>r.oee>=60&&r.oee<85).length, good = machineRows.filter(r=>r.oee>=85).length;
+  mkChart('c_tierDonut', { type:'doughnut', data:{ labels:['Poor','Average','Good'], datasets:[{ data:[poor,avg,good], backgroundColor:['#d5493b','#e0a52f','#2fae6b'], borderColor:'#fff', borderWidth:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, cutout:'58%', plugins:{legend:{display:false}} } });
+
+  // Calendar heatmap — OEE per day, current month
+  const calEl = document.getElementById('calHeatmap');
+  const monthStart = new Date(monthStartStr());
+  const dows = ['S','M','T','W','T','F','S'];
+  let calHtml = '<div class="cal-grid">' + dows.map(d=>`<div class="cal-dow">${d}</div>`).join('');
+  const offset = monthStart.getDay();
+  for(let i=0;i<offset;i++) calHtml += '<div></div>';
+  const monthEntries = (currentPlant==='consolidated' ? DB.entries : DB.entries.filter(e=>e.locationId===currentPlant)).filter(e=>inRange(e.date, monthStartStr(), todayStr()));
+  const byDay = {};
+  monthEntries.forEach(e=>{ (byDay[e.date]=byDay[e.date]||[]).push(e); });
+  const daysInMonth = new Date(monthStart.getFullYear(), monthStart.getMonth()+1, 0).getDate();
+  for(let d=1; d<=daysInMonth; d++){
+    const dateStr = monthStartStr().slice(0,8) + String(d).padStart(2,'0');
+    const dayEntries = byDay[dateStr];
+    if(!dayEntries){ calHtml += `<div class="cal-cell" style="background:#c7cfd8;" title="Day ${d}: no data">${d}</div>`; continue; }
+    const dayAgg = aggregate(dayEntries);
+    const color = dayAgg.oeePct<60 ? '#d5493b' : dayAgg.oeePct<85 ? '#e0a52f' : '#2fae6b';
+    calHtml += `<div class="cal-cell" style="background:${color};" title="Day ${d}: ${fmt1(dayAgg.oeePct)}% OEE">${d}</div>`;
+  }
+  calHtml += '</div>';
+  calEl.innerHTML = calHtml;
+};
+
+function machinesInScope(){
+  return currentPlant==='consolidated'
+    ? DB.machines.filter(m=>machineDepartment(m)==='forging')
+    : DB.machines.filter(m=>machineDepartment(m)==='forging' && m.location===currentPlant);
+}
+function groupByMachine(entries){
+  const byMachine = {};
+  entries.forEach(e=>{ (byMachine[e.machineId] = byMachine[e.machineId]||[]).push(e); });
+  return byMachine;
+}
+
+renderFns.production = function(){
+  const entries = scopedEntries();
+  const ms = machinesInScope();
+  const byMachine = groupByMachine(entries);
+  const machineRows = ms.map(m=>{
+    const mEntries = byMachine[m.id]||[];
+    let plannedQty = 0;
+    mEntries.forEach(e=>{ const c=entryCalc(e); plannedQty += (Number(e.spm)||0) * c.available; });
+    const actualQty = mEntries.reduce((s,e)=>s+(Number(e.qty)||0),0);
+    return { code: m.machineCode||m.name, planned: plannedQty, actual: actualQty };
+  });
+  const totalPlanned = machineRows.reduce((s,r)=>s+r.planned,0), totalActual = machineRows.reduce((s,r)=>s+r.actual,0);
+
+  const byShift = {};
+  entries.forEach(e=>{ byShift[e.shiftId] = (byShift[e.shiftId]||0) + (Number(e.qty)||0); });
+  const shiftEntries = Object.entries(byShift).sort((a,b)=>b[1]-a[1]);
+  const topShiftName = shiftEntries.length ? nameOf(DB.shifts, shiftEntries[0][0]) : '—';
+
+  const byItem = {};
+  entries.forEach(e=>{ byItem[e.itemId] = (byItem[e.itemId]||0) + (Number(e.qty)||0); });
+  const topItemEntries = Object.entries(byItem).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const topItemName = topItemEntries.length ? itemLabel(byId(DB.items, topItemEntries[0][0])) : '—';
+
+  document.getElementById('kpi-production').innerHTML = `
+    <div class="kpi-card"><div class="kpi-value">${fmt1(totalPlanned)}</div><div class="kpi-label">Planned Qty</div></div>
+    <div class="kpi-card good"><div class="kpi-value">${fmt1(safeDiv(totalActual,totalPlanned)*100)}%</div><div class="kpi-label">Planned vs Actual</div></div>
+    <div class="kpi-card"><div class="kpi-value" style="font-size:16px;">${topShiftName}</div><div class="kpi-label">Highest Output Shift</div></div>
+    <div class="kpi-card"><div class="kpi-value" style="font-size:14px;">${topItemName}</div><div class="kpi-label">Top Item (Qty)</div></div>
+  `;
+
+  mkChart('c_plannedActual', { type:'bar', data:{ labels:machineRows.map(r=>r.code), datasets:[
+      { label:'Planned', data:machineRows.map(r=>fmt1(r.planned)), backgroundColor:'rgba(15,53,87,0.18)', borderRadius:4 },
+      { label:'Actual', data:machineRows.map(r=>fmt1(r.actual)), backgroundColor:'#2f8fd8', borderRadius:4 } ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}}} } });
+
+  mkChart('c_shiftBar', { type:'bar', data:{ labels:shiftEntries.map(([id])=>nameOf(DB.shifts,id)), datasets:[{ data:shiftEntries.map(([,v])=>fmt1(v)), backgroundColor:['#0f3557','#5cb3e8','#2f8fd8'], borderRadius:6 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{color:'rgba(100,116,139,0.12)'}}, y:{grid:{display:false}}} } });
+
+  mkChart('c_topItems', { type:'bar', data:{ labels:topItemEntries.map(([id])=>itemLabel(byId(DB.items,id))), datasets:[{ data:topItemEntries.map(([,v])=>fmt1(v)), backgroundColor:'#2f8fd8', borderRadius:4 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{color:'rgba(100,116,139,0.12)'}}, y:{grid:{display:false}, ticks:{font:{size:10.5}}}} } });
+
+  const plantStackPanel = document.getElementById('panel-plantstack');
+  if(currentPlant === 'consolidated' && DB.locations.length > 1){
+    plantStackPanel.style.display = '';
+    const {start,end} = currentDateRange();
+    const weekBuckets = {};
+    entries.forEach(e=>{
+      const dayIdx = Math.floor((new Date(e.date) - new Date(start)) / 86400000 / 7);
+      const wk = 'Wk ' + (dayIdx+1);
+      if(!weekBuckets[wk]) weekBuckets[wk] = {};
+      weekBuckets[wk][e.locationId] = (weekBuckets[wk][e.locationId]||0) + (Number(e.qty)||0);
+    });
+    const weeks = Object.keys(weekBuckets).sort();
+    mkChart('c_plantStack', { type:'bar', data:{ labels:weeks, datasets: DB.locations.map((loc,i)=>({
+        label: loc.name, data: weeks.map(wk=>fmt1(weekBuckets[wk][loc.id]||0)),
+        backgroundColor: ['#0f3557','#5cb3e8','#2f8fd8','#8fb8d9'][i%4], borderRadius:3 })) },
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{stacked:true, grid:{display:false}}, y:{stacked:true, grid:{color:'rgba(100,116,139,0.12)'}}} } });
+  } else {
+    plantStackPanel.style.display = 'none';
+  }
+};
+
+function renderQualityKpis(entries, ms){
+  const agg = aggregate(entries);
+  const byMachine = groupByMachine(entries);
+  let worstCode = '—', worstPct = -1;
+  ms.forEach(m=>{
+    const a = aggregate(byMachine[m.id]||[]);
+    const pct = safeDiv(a.totalRejected, a.totalQty)*100;
+    if(a.totalQty>0 && pct>worstPct){ worstPct=pct; worstCode=m.machineCode||m.name; }
+  });
+  const reasonMap = {};
+  entries.forEach(e=>{ (e.downtimeBlocks||[]).forEach(b=>{ const key=b.reasonId||'__unspecified'; reasonMap[key]=(reasonMap[key]||0)+(Number(b.minutes)||0); }); });
+  const topReasonKey = Object.keys(reasonMap).sort((a,b)=>reasonMap[b]-reasonMap[a])[0];
+  const topReasonName = topReasonKey ? (topReasonKey==='__unspecified'?'Unspecified':nameOf(DB.reasons,topReasonKey)) : '—';
+  return { rejectPct: safeDiv(agg.totalRejected, agg.totalQty)*100, totalDowntime: agg.totalDowntime, topReasonName, worstCode };
+}
+
+renderFns.quality = function(){
+  const entries = scopedEntries();
+  const ms = machinesInScope();
+  const k = renderQualityKpis(entries, ms);
+  document.getElementById('kpi-quality').innerHTML = `
+    <div class="kpi-card bad"><div class="kpi-value">${fmt1(k.rejectPct)}%</div><div class="kpi-label">Reject Rate</div></div>
+    <div class="kpi-card"><div class="kpi-value">${fmt1(k.totalDowntime)} min</div><div class="kpi-label">Total Down Time</div></div>
+    <div class="kpi-card warn"><div class="kpi-value" style="font-size:16px;">${k.topReasonName}</div><div class="kpi-label">Top Down Time Reason</div></div>
+    <div class="kpi-card bad"><div class="kpi-value">${k.worstCode}</div><div class="kpi-label">Highest Reject % Machine</div></div>
+  `;
+
+  const {start,end} = currentDateRange();
+  const dateList = [];
+  for(let d=new Date(start); d<=new Date(end); d.setDate(d.getDate()+1)) dateList.push(d.toISOString().slice(0,10));
+  const byDate = {};
+  entries.forEach(e=>{ (byDate[e.date]=byDate[e.date]||[]).push(e); });
+  mkChart('c_rejectTrend', { type:'line', data:{ labels:dateList.map(d=>d.slice(5)), datasets:[{ data:dateList.map(d=>{ const a=aggregate(byDate[d]||[]); return fmt1(safeDiv(a.totalRejected,a.totalQty)*100); }), borderColor:'#d5493b', backgroundColor:'rgba(213,73,59,0.10)', fill:true, tension:0.35, pointRadius:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, ticks:{callback:v=>v+'%'}}} } });
+  mkChart('c_dtTrend', { type:'bar', data:{ labels:dateList.map(d=>d.slice(5)), datasets:[{ data:dateList.map(d=>fmt1((byDate[d]||[]).reduce((s,e)=>s+(Number(e.downtimeMinutes)||0),0))), backgroundColor:'#e0a52f', borderRadius:3 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}}} } });
+
+  const byMachine = groupByMachine(entries);
+  const rejByMachine = ms.map(m=>{ const a=aggregate(byMachine[m.id]||[]); return { code:m.machineCode||m.name, pct: safeDiv(a.totalRejected,a.totalQty)*100 }; });
+  mkChart('c_rejectByMachine', { type:'bar', data:{ labels:rejByMachine.map(r=>r.code), datasets:[{ data:rejByMachine.map(r=>fmt1(r.pct)), backgroundColor:rejByMachine.map(r=>r.pct>4?'#d5493b':r.pct>2.5?'#e0a52f':'#2fae6b'), borderRadius:4 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, ticks:{callback:v=>v+'%'}}} } });
+
+  const reasonMap = {};
+  entries.forEach(e=>{ (e.downtimeBlocks||[]).forEach(b=>{ const key=b.reasonId||'__unspecified'; reasonMap[key]=(reasonMap[key]||0)+(Number(b.minutes)||0); }); });
+  const reasonKeys = Object.keys(reasonMap).sort((a,b)=>reasonMap[b]-reasonMap[a]).slice(0,6);
+  mkChart('c_reasonPie2', { type:'pie', data:{ labels:reasonKeys.map(k=>k==='__unspecified'?'Unspecified':nameOf(DB.reasons,k)), datasets:[{ data:reasonKeys.map(k=>reasonMap[k]), backgroundColor:['#0f3557','#2f8fd8','#5cb3e8','#e0a52f','#8fb8d9','#b8c4d0'], borderColor:'#fff', borderWidth:2 }] },
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom', labels:{padding:10, boxWidth:10, font:{size:11}}}} } });
+
+  const byItem = {};
+  entries.forEach(e=>{ if(!byItem[e.itemId]) byItem[e.itemId]={qty:0,rejected:0}; byItem[e.itemId].qty+=Number(e.qty)||0; byItem[e.itemId].rejected+=Number(e.rejectedQty)||0; });
+  const itemRows = Object.entries(byItem).map(([id,v])=>({ label:itemLabel(byId(DB.items,id)), pct: safeDiv(v.rejected,v.qty)*100 })).filter(r=>r.pct>=0).sort((a,b)=>b.pct-a.pct).slice(0,10);
+  mkChart('c_itemQuality', { type:'bar', data:{ labels:itemRows.map(r=>r.label), datasets:[{ data:itemRows.map(r=>fmt1(r.pct)), backgroundColor:itemRows.map(r=>r.pct>4?'#d5493b':r.pct>2.5?'#e0a52f':'#2fae6b'), borderRadius:4 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{color:'rgba(100,116,139,0.12)'}, ticks:{callback:v=>v+'%'}}, y:{grid:{display:false}, ticks:{font:{size:10.5}}}} } });
+};
+
+renderFns.machine = function(){
+  const entries = scopedEntries();
+  const ms = machinesInScope();
+  const byMachine = groupByMachine(entries);
+  const rows = ms.map(m=>{
+    const a = aggregate(byMachine[m.id]||[]);
+    const dtMin = (byMachine[m.id]||[]).reduce((s,e)=>s+(Number(e.downtimeMinutes)||0),0);
+    return { code: m.machineCode||m.name, qty: a.totalQty, rejected: a.totalRejected, avail: a.availPct, perf: a.perfPct, qual: a.qualPct, oee: a.oeePct, dtMin, rejPct: safeDiv(a.totalRejected,a.totalQty)*100 };
+  }).filter(r=>r.qty > 0 || r.dtMin > 0);
+
+  mkChart('c_oeeBreakdown', { type:'bar', data:{ labels:rows.map(r=>r.code), datasets:[
+      { label:'Availability', data:rows.map(r=>fmt1(r.avail)), backgroundColor:'#0f3557', borderRadius:3 },
+      { label:'Performance', data:rows.map(r=>fmt1(r.perf)), backgroundColor:'#2f8fd8', borderRadius:3 },
+      { label:'Quality', data:rows.map(r=>fmt1(r.qual)), backgroundColor:'#5cb3e8', borderRadius:3 } ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, max:100}} } });
+
+  if(rows.length > 0){
+    const best = [...rows].sort((a,b)=>b.oee-a.oee)[0], worst = [...rows].sort((a,b)=>a.oee-b.oee)[0];
+    mkChart('c_radar', { type:'radar', data:{ labels:['Availability','Performance','Quality','OEE','Uptime'], datasets:[
+        { label:`${best.code} (Best)`, data:[best.avail,best.perf,best.qual,best.oee,Math.max(best.avail-2,0)].map(fmt1), borderColor:'#2fae6b', backgroundColor:'rgba(47,174,107,0.15)', pointBackgroundColor:'#2fae6b' },
+        { label:`${worst.code} (Worst)`, data:[worst.avail,worst.perf,worst.qual,worst.oee,Math.max(worst.avail-6,0)].map(fmt1), borderColor:'#d5493b', backgroundColor:'rgba(213,73,59,0.12)', pointBackgroundColor:'#d5493b' } ]},
+      options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{r:{grid:{color:'rgba(100,116,139,0.12)'}, angleLines:{color:'rgba(100,116,139,0.12)'}, suggestedMin:0, suggestedMax:100}} } });
+  } else { destroyChart('c_radar'); }
+
+  mkChart('c_correlation', { type:'scatter', data:{ datasets:[{
+      data: rows.map(r=>({x:r.dtMin, y:fmt1(r.rejPct), label:r.code})),
+      backgroundColor:'#2f8fd8', pointRadius:7, pointHoverRadius:9
+    }]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => `${c.raw.label}: ${c.raw.x} min downtime, ${c.raw.y}% reject` } } },
+      scales:{ x:{ title:{display:true, text:'Down Time (min)'}, grid:{color:'rgba(100,116,139,0.12)'} }, y:{ title:{display:true, text:'Reject Rate %'}, grid:{color:'rgba(100,116,139,0.12)'} } } } });
+
+  document.getElementById('scorecardBody').innerHTML = rows.length===0 ? `<tr><td colspan="7">No entries for this range.</td></tr>` : rows.map(r=>`
+    <tr>
+      <td style="font-weight:600;">${r.code}</td>
+      <td>${fmt1(r.qty)}</td>
+      <td>${fmt1(r.rejected)}</td>
+      <td>${tierPill(r.avail)}</td>
+      <td>${tierPill(r.perf)}</td>
+      <td>${tierPill(r.qual)}</td>
+      <td>${tierPill(r.oee)}</td>
+    </tr>`).join('');
+};
+
+renderFns.operator = function(){
+  const entries = scopedEntries();
+  const byOperator = {};
+  entries.forEach(e=>{
+    const key = e.operatorName || '(unnamed)';
+    if(!byOperator[key]) byOperator[key] = { entries:0, qty:0, rejected:0 };
+    byOperator[key].entries += 1;
+    byOperator[key].qty += Number(e.qty)||0;
+    byOperator[key].rejected += Number(e.rejectedQty)||0;
+  });
+  const ops = Object.entries(byOperator).map(([n,v])=>({ n, ...v, rejectPct: safeDiv(v.rejected, v.qty)*100 }));
+  const byQtyDesc = [...ops].sort((a,b)=>b.qty-a.qty);
+  const totalQty = ops.reduce((s,o)=>s+o.qty,0);
+
+  document.getElementById('kpi-operator').innerHTML = `
+    <div class="kpi-card"><div class="kpi-value">${ops.length}</div><div class="kpi-label">Active Operators</div></div>
+    <div class="kpi-card"><div class="kpi-value">${ops.length ? fmt1(totalQty/ops.length) : 0}</div><div class="kpi-label">Avg Qty per Operator</div></div>
+    <div class="kpi-card good"><div class="kpi-value" style="font-size:16px;">${byQtyDesc.length?byQtyDesc[0].n:'—'}</div><div class="kpi-label">Highest Qty Produced</div></div>
+    <div class="kpi-card bad"><div class="kpi-value" style="font-size:16px;">${byQtyDesc.length?byQtyDesc[byQtyDesc.length-1].n:'—'}</div><div class="kpi-label">Lowest Qty Produced</div></div>
+  `;
+
+  const top10 = byQtyDesc.slice(0,10), bottom10 = byQtyDesc.slice(-10).reverse();
+  mkChart('c_topQty', { type:'bar', data:{ labels:top10.map(o=>o.n), datasets:[{ data:top10.map(o=>fmt1(o.qty)), backgroundColor:'#2f8fd8', borderRadius:4 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{color:'rgba(100,116,139,0.12)'}}, y:{grid:{display:false}}} } });
+  mkChart('c_bottomQty', { type:'bar', data:{ labels:bottom10.map(o=>o.n), datasets:[{ data:bottom10.map(o=>fmt1(o.qty)), backgroundColor:'#5cb3e8', borderRadius:4 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{grid:{color:'rgba(100,116,139,0.12)'}}, y:{grid:{display:false}}} } });
+
+  document.getElementById('operatorBody').innerHTML = byQtyDesc.length===0 ? `<tr><td colspan="5">No entries for this range.</td></tr>` : byQtyDesc.map(o=>`
+    <tr>
+      <td style="font-weight:600;">${o.n}</td>
+      <td>${o.entries}</td>
+      <td>${fmt1(o.qty)}</td>
+      <td>${fmt1(o.rejected)}</td>
+      <td>${tierPillReject(o.rejectPct)}</td>
+    </tr>`).join('');
+};
+
+renderFns.insights = function(){
+  const entries = currentPlant==='consolidated' ? DB.entries : DB.entries.filter(e=>e.locationId===currentPlant);
+
+  // Month-over-Month
+  const now = new Date();
+  const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const lastMonthStart = new Date(now.getFullYear(), now.getMonth()-1, 1);
+  const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+  const daysSoFar = now.getDate();
+  const thisMonthByDay = {}, lastMonthByDay = {};
+  entries.forEach(e=>{
+    const d = new Date(e.date);
+    if(d >= thisMonthStart && d <= now) thisMonthByDay[d.getDate()] = (thisMonthByDay[d.getDate()]||0) + (Number(e.qty)||0);
+    if(d >= lastMonthStart && d <= lastMonthEnd) lastMonthByDay[d.getDate()] = (lastMonthByDay[d.getDate()]||0) + (Number(e.qty)||0);
+  });
+  const dayLabels = Array.from({length: daysSoFar}, (_,i)=>i+1);
+  mkChart('c_mom', { type:'line', data:{ labels:dayLabels, datasets:[
+      { label:'This Month', data:dayLabels.map(d=>fmt1(thisMonthByDay[d]||0)), borderColor:'#2f8fd8', backgroundColor:'rgba(47,143,216,0.08)', fill:true, tension:0.35, pointRadius:2 },
+      { label:'Last Month', data:dayLabels.map(d=>fmt1(lastMonthByDay[d]||0)), borderColor:'#9aa7b5', borderDash:[5,4], fill:false, tension:0.35, pointRadius:2 } ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}}, scales:{x:{grid:{display:false}, title:{display:true, text:'Day of Month'}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, beginAtZero:true}} } });
+
+  // Pareto — MTD
+  const mtdEntries = entries.filter(e=>inRange(e.date, monthStartStr(), todayStr()));
+  const reasonMap = {};
+  mtdEntries.forEach(e=>{ (e.downtimeBlocks||[]).forEach(b=>{ const key=b.reasonId||'__unspecified'; reasonMap[key]=(reasonMap[key]||0)+(Number(b.minutes)||0); }); });
+  const reasonKeys = Object.keys(reasonMap).sort((a,b)=>reasonMap[b]-reasonMap[a]);
+  const reasonTotal = reasonKeys.reduce((s,k)=>s+reasonMap[k],0);
+  let running = 0;
+  const cumPct = reasonKeys.map(k=>{ running += reasonMap[k]; return fmt1(safeDiv(running,reasonTotal)*100); });
+  mkChart('c_pareto', { data:{ labels:reasonKeys.map(k=>k==='__unspecified'?'Unspecified':nameOf(DB.reasons,k)), datasets:[
+      { type:'bar', label:'Minutes', data:reasonKeys.map(k=>reasonMap[k]), backgroundColor:'#2f8fd8', borderRadius:4, yAxisID:'y' },
+      { type:'line', label:'Cumulative %', data:cumPct, borderColor:'#d5493b', backgroundColor:'#d5493b', tension:0.2, pointRadius:4, yAxisID:'y1' } ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'bottom'}},
+      scales:{ x:{grid:{display:false}}, y:{grid:{color:'rgba(100,116,139,0.12)'}, title:{display:true, text:'Minutes'}}, y1:{position:'right', min:0, max:100, grid:{display:false}, ticks:{callback:v=>v+'%'}, title:{display:true, text:'Cumulative %'}} } } });
+
+  // Gauge — MTD OEE vs target
+  const gaugeTarget = 75;
+  const gaugeValue = fmt1(aggregate(mtdEntries).oeePct);
+  mkChart('c_gauge', { type:'doughnut', data:{ datasets:[{
+      data:[gaugeValue, Math.max(100-gaugeValue,0)],
+      backgroundColor:[gaugeValue>=gaugeTarget?'#2fae6b':gaugeValue>=60?'#e0a52f':'#d5493b', 'rgba(100,116,139,0.12)'], borderWidth:0 }] },
+    options:{ responsive:true, maintainAspectRatio:false, circumference:180, rotation:270, cutout:'72%', plugins:{legend:{display:false}, tooltip:{enabled:false}} } });
+  document.getElementById('gaugeValueText').textContent = gaugeValue + '%';
+  document.getElementById('gaugeTargetText').textContent = 'Target: ' + gaugeTarget + '% · MTD, ' + (currentPlant==='consolidated'?'Consolidated':nameOf(DB.locations,currentPlant));
+
+  // Anomaly callouts — real comparisons: this week vs last week, per machine
+  const weekAgoStart = daysAgoStr(6), twoWeeksAgoStart = daysAgoStr(13), twoWeeksAgoEnd = daysAgoStr(7);
+  const ms = machinesInScope();
+  const anomalies = [];
+  ms.forEach(m=>{
+    const thisWeek = entries.filter(e=>e.machineId===m.id && inRange(e.date, weekAgoStart, todayStr()));
+    const lastWeek = entries.filter(e=>e.machineId===m.id && inRange(e.date, twoWeeksAgoStart, twoWeeksAgoEnd));
+    if(thisWeek.length===0 || lastWeek.length===0) return;
+    const thisOee = aggregate(thisWeek).oeePct, lastOee = aggregate(lastWeek).oeePct;
+    const delta = thisOee - lastOee;
+    anomalies.push({ code: m.machineCode||m.name, delta, thisOee, lastOee });
+  });
+  anomalies.sort((a,b)=>a.delta-b.delta);
+  const worst = anomalies[0], best = anomalies[anomalies.length-1];
+  let anomalyHtml = '';
+  if(worst && worst.delta < -5){
+    anomalyHtml += `<div class="anomaly-card bad"><span class="anomaly-icon">&#9660;</span><div class="anomaly-text"><b>${worst.code} down ${fmt1(Math.abs(worst.delta))}% vs last week</b><span>OEE dropped from ${fmt1(worst.lastOee)}% to ${fmt1(worst.thisOee)}% over 7 days.</span></div></div>`;
+  }
+  if(best && best.delta > 5){
+    anomalyHtml += `<div class="anomaly-card good"><span class="anomaly-icon">&#9650;</span><div class="anomaly-text"><b>${best.code} up ${fmt1(best.delta)}% vs last week</b><span>OEE rose from ${fmt1(best.lastOee)}% to ${fmt1(best.thisOee)}% over 7 days.</span></div></div>`;
+  }
+  const last3Days = [daysAgoStr(2), daysAgoStr(1), todayStr()];
+  const rejByDay = last3Days.map(d=>{ const a=aggregate(entries.filter(e=>e.date===d)); return safeDiv(a.totalRejected,a.totalQty)*100; });
+  if(rejByDay[0] < rejByDay[1] && rejByDay[1] < rejByDay[2] && rejByDay[2] > 0){
+    anomalyHtml += `<div class="anomaly-card warn"><span class="anomaly-icon">&#9888;</span><div class="anomaly-text"><b>Reject rate up 3 days running</b><span>${fmt1(rejByDay[0])}% &rarr; ${fmt1(rejByDay[1])}% &rarr; ${fmt1(rejByDay[2])}% across the last 3 days.</span></div></div>`;
+  }
+  document.getElementById('anomalyList').innerHTML = anomalyHtml || `<div style="font-size:12.5px; color:var(--ink-dim); padding:8px;">No notable changes detected in the last 7 days.</div>`;
+};
+
+function renderCurrentTab(){
+  try {
+    renderFns[currentTab]();
+  } catch(err) {
+    const wrapEl = document.querySelector('.wrap');
+    const banner = document.createElement('div');
+    banner.className = 'err-banner';
+    banner.textContent = 'Render error on tab "' + currentTab + '": ' + err.message;
+    wrapEl.prepend(banner);
+    console.error(err);
+  }
+}
+
+function renderApp(){
+  document.getElementById('app').innerHTML = `
+    <div class="topbar">
+      <div class="topbar-row">
+        <div>
+          <div class="topbar-eyebrow">PRF MANUFACTURING · LIVE ANALYTICS</div>
+          <h1>Forging Performance Overview</h1>
+        </div>
+        <button class="logout-btn" id="logoutBtn">Sign Out (${SESSION.name})</button>
+      </div>
+      <div class="tabs">
+        <button class="tab active" data-tab="overview">Overview</button>
+        <button class="tab" data-tab="production">Production Analysis</button>
+        <button class="tab" data-tab="quality">Quality &amp; Downtime</button>
+        <button class="tab" data-tab="machine">Machine Analysis</button>
+        <button class="tab" data-tab="operator">Operator Performance</button>
+        <button class="tab" data-tab="insights">Insights</button>
+      </div>
+    </div>
+    <div class="wrap">
+      <div class="plant-bar">
+        <span class="plant-label">Plant</span>
+        <div class="plant-tabs">
+          <button class="plant-tab active" data-plant="consolidated">Consolidated</button>
+          ${DB.locations.map(l=>`<button class="plant-tab" data-plant="${l.id}">${l.name}</button>`).join('')}
+        </div>
+        <select class="range-select" id="rangeSelect">
+          <option value="mtd">Month to Date</option>
+          <option value="30d">Last 30 Days</option>
+          <option value="14d">Last 14 Days</option>
+        </select>
+      </div>
+      <div class="tabpanel active" id="panel-overview">
+        <div class="kpi-row" id="kpi-overview"></div>
+        <div class="grid-2">
+          <div class="panel"><h3>Daily Production</h3><div class="chart-box tall"><canvas id="c_trend"></canvas></div></div>
+          <div class="panel"><h3 id="h_plantDonut">Production by Plant</h3><div class="chart-box tall"><canvas id="c_plantDonut"></canvas></div></div>
+        </div>
+        <div class="grid-3">
+          <div class="panel"><h3>OEE % by Machine</h3><div class="chart-box"><canvas id="c_machineBar"></canvas></div></div>
+          <div class="panel"><h3>Down Time by Reason</h3><div class="chart-box"><canvas id="c_reasonPie"></canvas></div></div>
+          <div class="panel"><h3>Performance Tier Split</h3><div class="chart-box"><canvas id="c_tierDonut"></canvas></div>
+            <div class="legend-row"><span><span class="legend-dot" style="background:#d5493b;"></span>Poor</span><span><span class="legend-dot" style="background:#e0a52f;"></span>Average</span><span><span class="legend-dot" style="background:#2fae6b;"></span>Good</span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>OEE by Day — This Month</h3>
+          <div id="calHeatmap"></div>
+          <div class="legend-row">
+            <span><span class="legend-dot" style="background:#d5493b;"></span>&lt;60%</span>
+            <span><span class="legend-dot" style="background:#e0a52f;"></span>60&ndash;85%</span>
+            <span><span class="legend-dot" style="background:#2fae6b;"></span>85%+</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="panel-production">
+        <div class="kpi-row four" id="kpi-production"></div>
+        <div class="grid-2">
+          <div class="panel"><h3>Planned vs Actual — by Machine</h3><div class="chart-box tall"><canvas id="c_plannedActual"></canvas></div></div>
+          <div class="panel"><h3>Production by Shift</h3><div class="chart-box tall"><canvas id="c_shiftBar"></canvas></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel"><h3>Top Items by Qty</h3><div class="chart-box tall"><canvas id="c_topItems"></canvas></div></div>
+          <div class="panel" id="panel-plantstack"><h3>Production Mix — By Plant (Weekly)</h3><div class="chart-box tall"><canvas id="c_plantStack"></canvas></div></div>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="panel-quality">
+        <div class="kpi-row four" id="kpi-quality"></div>
+        <div class="grid-2">
+          <div class="panel"><h3>Reject % Trend</h3><div class="chart-box tall"><canvas id="c_rejectTrend"></canvas></div></div>
+          <div class="panel"><h3>Down Time Trend</h3><div class="chart-box tall"><canvas id="c_dtTrend"></canvas></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel"><h3>Reject % by Machine</h3><div class="chart-box tall"><canvas id="c_rejectByMachine"></canvas></div></div>
+          <div class="panel"><h3>Down Time by Reason</h3><div class="chart-box tall"><canvas id="c_reasonPie2"></canvas></div></div>
+        </div>
+        <div class="panel"><h3>Item-wise Quality — Reject % by Item</h3><div class="chart-box tall"><canvas id="c_itemQuality"></canvas></div></div>
+      </div>
+
+      <div class="tabpanel" id="panel-machine">
+        <div class="grid-2">
+          <div class="panel"><h3>OEE Breakdown — Availability / Performance / Quality</h3><div class="chart-box tall"><canvas id="c_oeeBreakdown"></canvas></div></div>
+          <div class="panel"><h3>Best vs Worst Machine — All Factors</h3><div class="chart-box tall"><canvas id="c_radar"></canvas></div></div>
+        </div>
+        <div class="panel" style="margin-bottom:16px;"><h3>Down Time vs Reject Rate — Correlation</h3><div class="chart-box tall"><canvas id="c_correlation"></canvas></div></div>
+        <div class="panel">
+          <h3>Machine Scorecard</h3>
+          <div class="table-scroll">
+          <table>
+            <thead><tr><th>Machine</th><th>Qty</th><th>Rejected</th><th>Availability</th><th>Performance</th><th>Quality</th><th>OEE</th></tr></thead>
+            <tbody id="scorecardBody"></tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="panel-operator">
+        <div class="kpi-row four" id="kpi-operator"></div>
+        <p style="font-size:12px; color:var(--ink-dim); margin-bottom:16px;">Ranked by Production Qty.</p>
+        <div class="grid-2">
+          <div class="panel"><h3>Top 10 Operators — Highest Qty</h3><div class="chart-box tall"><canvas id="c_topQty"></canvas></div></div>
+          <div class="panel"><h3>Bottom 10 Operators — Lowest Qty</h3><div class="chart-box tall"><canvas id="c_bottomQty"></canvas></div></div>
+        </div>
+        <div class="panel">
+          <h3>Operator Scorecard</h3>
+          <div class="table-scroll">
+          <table>
+            <thead><tr><th>Operator</th><th>Entries</th><th>Qty</th><th>Rejected</th><th>Reject %</th></tr></thead>
+            <tbody id="operatorBody"></tbody>
+          </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="tabpanel" id="panel-insights">
+        <div class="grid-2">
+          <div class="panel"><h3>Month-over-Month Overlay</h3><div class="chart-box tall"><canvas id="c_mom"></canvas></div></div>
+          <div class="panel"><h3>Pareto — Down Time Reasons</h3><div class="chart-box tall"><canvas id="c_pareto"></canvas></div></div>
+        </div>
+        <div class="grid-2">
+          <div class="panel">
+            <h3>Target vs Actual OEE</h3>
+            <div style="display:flex; flex-direction:column; align-items:center;">
+              <div class="chart-box" style="height:180px; width:100%;"><canvas id="c_gauge"></canvas></div>
+              <div style="font-size:30px; font-weight:800; color:var(--navy); margin-top:-58px;" id="gaugeValueText"></div>
+              <div style="font-size:12px; color:var(--ink-dim); margin-top:2px;" id="gaugeTargetText"></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h3>Automatic Anomaly Callouts</h3>
+            <div id="anomalyList"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('logoutBtn').onclick = ()=>{ SESSION=null; sessionStorage.removeItem('prf_analytics_session'); renderLogin(); };
+  document.getElementById('rangeSelect').onchange = (ev)=>{ currentRangeMode = ev.target.value; renderCurrentTab(); };
+  document.querySelectorAll('.tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      currentTab = btn.dataset.tab;
+      document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t===btn));
+      document.querySelectorAll('.tabpanel').forEach(p=>p.classList.toggle('active', p.id==='panel-'+currentTab));
+      renderCurrentTab();
+    });
+  });
+  document.querySelectorAll('.plant-tab').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      currentPlant = btn.dataset.plant;
+      document.querySelectorAll('.plant-tab').forEach(t=>t.classList.toggle('active', t===btn));
+      renderCurrentTab();
+    });
+  });
+  renderCurrentTab();
+}
+
+// =========================================================================
+// Boot
+// =========================================================================
+(async function boot(){
+  try {
+    await loadAll();
+  } catch(err) {
+    document.getElementById('app').innerHTML = '<div class="loading-wrap">Failed to load data: ' + err.message + '</div>';
+    return;
+  }
+  const savedId = sessionStorage.getItem('prf_analytics_session');
+  if(savedId){
+    const user = DB.users.find(u=>u.id===savedId);
+    if(user && ['admin','head','management'].includes(user.role)){ SESSION = user; renderApp(); return; }
+  }
+  renderLogin();
+})();
+</script>
+</body>
+</html>
