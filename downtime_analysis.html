@@ -129,7 +129,7 @@ function allDowntimeEvents(){
       if(minutes <= 0) return;
       events.push({
         date: e.date, machine: machineLabel(e.machineId), shift: nameOf(DB.shifts, e.shiftId),
-        reasonId: b.reasonId, reason: b.reasonId ? nameOf(DB.reasons, b.reasonId) : 'Unspecified',
+        reasonId: b.reasonId, reason: !b.reasonId ? 'Unspecified' : (byId(DB.reasons, b.reasonId) ? nameOf(DB.reasons, b.reasonId) : 'Unknown Reason (deleted from Master Data?)'),
         from: b.from||'', to: b.to||'', minutes, operator: e.operatorName||'—', remark: b.remark||''
       });
     });
@@ -198,7 +198,9 @@ function filteredEvents(){
   const {start,end} = currentDateRange();
   return allDowntimeEvents().filter(e=>{
     if(!inRange(e.date, start, end)) return false;
-    if(currentReason && e.reasonId !== currentReason) return false;
+    if(currentReason === '__unspecified__' && e.reasonId) return false;
+    if(currentReason === '__unknown__' && (!e.reasonId || byId(DB.reasons, e.reasonId))) return false;
+    if(currentReason && currentReason !== '__unspecified__' && currentReason !== '__unknown__' && e.reasonId !== currentReason) return false;
     if(currentMachine && e.machine !== currentMachine) return false;
     return true;
   });
@@ -279,7 +281,7 @@ function renderApp(){
     </div>
     <div class="wrap">
       <div class="filter-bar">
-        <select id="reasonFilter"><option value="">All Reasons</option>${DB.reasons.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}</select>
+        <select id="reasonFilter"><option value="">All Reasons</option>${DB.reasons.map(r=>`<option value="${r.id}">${r.name}</option>`).join('')}<option value="__unspecified__">— Unspecified (no reason selected) —</option><option value="__unknown__">— Unknown Reason (deleted from Master Data) —</option></select>
         <select id="machineFilter"><option value="">All Machines</option>${machineNames.map(m=>`<option value="${m}">${m}</option>`).join('')}</select>
         <select id="rangeFilter"><option value="mtd">Month to Date</option><option value="30d">Last 30 Days</option><option value="14d">Last 14 Days</option><option value="specific">Specific Date</option><option value="custom">Custom Range</option></select>
         <input type="date" id="specificDateInput" style="display:none;" value="${todayStr()}">
