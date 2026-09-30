@@ -166,6 +166,16 @@ async function sha256(text){
   return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
 }
 
+// Set true only once loadAll() has actually completed a successful kv_store fetch.
+// save() refuses to write anything until this is true — otherwise a failed/partial
+// load (e.g. during an outage) leaves DB[key] empty or incomplete, and the very next
+// save would silently overwrite good data in Supabase with that empty/partial copy.
+let kvStoreLoadedSuccessfully = false;
+// Highest record count ever seen for each kv_store-backed key during this session,
+// recorded right after a successful load. A save that would drop far below this
+// peak is far more likely to be a bug or a bad load than a real bulk deletion, so
+// it requires explicit confirmation rather than saving silently.
+let kvStorePeakCounts = {};
 async function loadAll(){
   try{
     const { data, error } = await supabaseClient.from('kv_store').select('key,value');
@@ -175,7 +185,9 @@ async function loadAll(){
     Object.keys(STORE_KEYS).forEach(k=>{
       if(k === 'entries') return; // entries load from their own real table now, not the shared blob
       DB[k] = map[STORE_KEYS[k]] || [];
+      kvStorePeakCounts[k] = Math.max(kvStorePeakCounts[k]||0, DB[k].length);
     });
+    kvStoreLoadedSuccessfully = true;
   }catch(e){ console.error('supabase load exception', e); }
   await loadEntriesTable();
   await loadHtEntriesTable();
@@ -416,11 +428,27 @@ async function deleteHtEntryRow(id){
 }
 
 async function save(key){
+  if(!kvStoreLoadedSuccessfully){
+    console.error(`Refused to save "${key}" — the initial data load never succeeded, so local data may be empty or incomplete. Saving now would risk overwriting good data in Supabase.`);
+    alert('Could not save — your data did not load correctly when this page opened (likely a connection issue). To protect your existing data, nothing was saved. Please do a full page refresh and try again.');
+    return false;
+  }
+  const peak = kvStorePeakCounts[key] || 0;
+  const current = (DB[key] || []).length;
+  // Guard against a save that would drastically shrink a list that's held meaningfully
+  // more records before this session — most likely a bad load or a bug, not an
+  // intentional bulk deletion, so this requires explicit confirmation rather than
+  // saving silently.
+  if(peak >= 3 && current < peak * 0.5){
+    const proceed = confirm(`Warning: you're about to save "${key}" with only ${current} record(s), down from ${peak} seen earlier this session. This looks more like accidental data loss than an intentional bulk deletion.\n\nClick OK to save anyway, or Cancel to stop and investigate first.`);
+    if(!proceed){ console.warn(`Save of "${key}" cancelled — record count would drop from ${peak} to ${current}.`); return false; }
+  }
   try{
     const { error } = await supabaseClient
       .from('kv_store')
       .upsert({ key: STORE_KEYS[key], value: DB[key], updated_at: new Date().toISOString() });
     if(error){ console.error('supabase save error', error); return false; }
+    kvStorePeakCounts[key] = Math.max(kvStorePeakCounts[key]||0, current);
     return true;
   }catch(e){ console.error('supabase save exception', e); return false; }
 }
@@ -5471,7 +5499,7 @@ function wireUsersCsvImport(){
       const id = (row['userid']||'').trim();
       const name = (row['fullname']||'').trim();
       let role = (row['role']||'').trim().toLowerCase();
-      if(!['operator','supervisor','head','management','marketing','admin'].includes(role)) role = '';
+      if(!['operator','supervisor','head','management','marketing','admin','maintenance','custom'].includes(role)) role = '';
       const locName = (row['location']||'').trim();
       const location = locName ? DB.locations.find(l=>l.name.toLowerCase()===locName.toLowerCase()) : null;
       const password = row['password']||'';
