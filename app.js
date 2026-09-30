@@ -834,8 +834,18 @@ function render(){
   applyProcessTheme();
   const app = document.getElementById('app');
   if(!SESSION){ app.innerHTML = renderLogin(); attachLoginEvents(); return; }
-  app.innerHTML = renderShell();
-  attachShellEvents();
+  try {
+    app.innerHTML = renderShell();
+    attachShellEvents();
+  } catch(err) {
+    console.error('Render failed', err);
+    app.innerHTML = `<div style="padding:40px; max-width:700px; margin:0 auto; font-family:monospace;">
+      <h2 style="color:#d5493b;">Something went wrong displaying this page</h2>
+      <p style="margin:12px 0; color:#94a3b8;">This is a rendering error, not a data-loss issue — your data in Supabase is unaffected. Please report the exact text below.</p>
+      <pre style="background:#1a1a1a; color:#f0f0f0; padding:16px; border-radius:6px; overflow-x:auto; white-space:pre-wrap;">${(err && err.stack) ? err.stack : String(err)}</pre>
+      <button onclick="location.reload()" style="margin-top:16px; padding:10px 20px; cursor:pointer;">Reload Page</button>
+    </div>`;
+  }
 }
 
 /* ================= LOGIN ================= */
