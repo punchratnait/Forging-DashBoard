@@ -5048,7 +5048,25 @@ function findMisclassifiedShiftEntries(){
    broken, but plain stored values (SPM, Qty, Operator, Date) survive untouched, so
    those are surfaced as context to help identify which current machine each group
    was, without needing the lost original mapping. */
-function findOrphanedMachineGroups(entries, machineIdField){
+/* Suggests which current machine an orphaned group most likely was, by comparing the
+   group's distinct SPM values against each current machine's known SPM values (from
+   the already-recovered SPM table). SPM is machine-specific in practice, so a strong
+   overlap is a real signal — but this is a suggestion to review, not a guarantee, so
+   it's surfaced as a pre-selected option with a confidence score, not applied blind. */
+function bestMachineGuess(spmValues, dept){
+  if(!spmValues || spmValues.length===0) return null;
+  const deptMachines = DB.machines.filter(m=>machineDepartment(m)===dept);
+  let best = null, bestScore = 0;
+  deptMachines.forEach(m=>{
+    const spmSet = new Set(DB.spm.filter(s=>s.machineId===m.id).map(s=>s.spm));
+    if(spmSet.size===0) return;
+    const overlap = spmValues.filter(v=>spmSet.has(v)).length;
+    const score = overlap / spmValues.length;
+    if(score > bestScore){ bestScore = score; best = m.id; }
+  });
+  return (best && bestScore > 0) ? { machineId: best, confidence: Math.round(bestScore*100) } : null;
+}
+function findOrphanedMachineGroups(entries, machineIdField, dept){
   const byOldId = {};
   entries.forEach(e=>{
     const mid = e[machineIdField];
@@ -5060,7 +5078,8 @@ function findOrphanedMachineGroups(entries, machineIdField){
     const spmSet = [...new Set(group.map(e=>e.spm).filter(v=>v!==undefined && v!==null))].sort((a,b)=>a-b);
     const operators = [...new Set(group.map(e=>e.operatorName).filter(Boolean))];
     const totalQty = group.reduce((s,e)=>s+(Number(e.qty)||0),0);
-    return { oldId, count: group.length, dateFrom: dates[0], dateTo: dates[dates.length-1], spmValues: spmSet, operators, totalQty };
+    const guess = bestMachineGuess(spmSet, dept);
+    return { oldId, count: group.length, dateFrom: dates[0], dateTo: dates[dates.length-1], spmValues: spmSet, operators, totalQty, guess };
   }).sort((a,b)=>b.count-a.count);
 }
 function findOrphanedShiftGroups(entries){
@@ -5112,9 +5131,9 @@ function renderLocationMismatchPanel(){
   const dupeProdGroups = allDuplicateProductionGroups();
   const totalDupeProdGroups = dupeProdGroups.forging.length + dupeProdGroups.heattreatment.length + dupeProdGroups.cnc.length;
   const orphanedMachineGroups = {
-    forging: findOrphanedMachineGroups(DB.entries, 'machineId'),
-    heattreatment: findOrphanedMachineGroups(DB.htentries, 'furnaceId'),
-    cnc: findOrphanedMachineGroups(DB.cncentries, 'machineId')
+    forging: findOrphanedMachineGroups(DB.entries, 'machineId', 'forging'),
+    heattreatment: findOrphanedMachineGroups(DB.htentries, 'furnaceId', 'heattreatment'),
+    cnc: findOrphanedMachineGroups(DB.cncentries, 'machineId', 'cnc')
   };
   const totalOrphanedMachineGroups = orphanedMachineGroups.forging.length + orphanedMachineGroups.heattreatment.length + orphanedMachineGroups.cnc.length;
   const orphanedShiftGroups = {
@@ -5264,9 +5283,9 @@ function productionDupeResolveModal(){
 }
 function relinkOrphanedModal(){
   const machineGroups = {
-    forging: findOrphanedMachineGroups(DB.entries, 'machineId'),
-    heattreatment: findOrphanedMachineGroups(DB.htentries, 'furnaceId'),
-    cnc: findOrphanedMachineGroups(DB.cncentries, 'machineId')
+    forging: findOrphanedMachineGroups(DB.entries, 'machineId', 'forging'),
+    heattreatment: findOrphanedMachineGroups(DB.htentries, 'furnaceId', 'heattreatment'),
+    cnc: findOrphanedMachineGroups(DB.cncentries, 'machineId', 'cnc')
   };
   const shiftGroups = {
     forging: findOrphanedShiftGroups(DB.entries),
@@ -5277,13 +5296,15 @@ function relinkOrphanedModal(){
   const machineRows = Object.entries(machineGroups).flatMap(([dept, groups])=>
     groups.map((g,gi)=>{
       const deptMachines = DB.machines.filter(m=>machineDepartment(m)===dept);
+      const guessedMachine = g.guess ? byId(DB.machines, g.guess.machineId) : null;
       return `
       <div style="margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--line);">
         <div style="font-size:13px; margin-bottom:6px;"><b>${deptLabels[dept]}</b> — old machine reference, ${g.count} entries, ${g.dateFrom} to ${g.dateTo}</div>
         <div style="font-size:12px; color:var(--ink-dim); margin-bottom:6px;">SPM seen: ${g.spmValues.join(', ')||'—'} · Operators: ${g.operators.join(', ')||'—'} · Total Qty: ${g.totalQty}</div>
+        ${guessedMachine ? `<div style="font-size:12px; color:var(--amber); margin-bottom:6px;">⚠ Suggested: ${guessedMachine.machineCode||guessedMachine.name} (${g.guess.confidence}% of this group's SPM values match this machine's known SPM) — please verify before applying.</div>` : ''}
         <select data-relink-machine="${dept}::${g.oldId}" style="font-size:13px;">
           <option value="">— Leave unlinked —</option>
-          ${deptMachines.map(m=>`<option value="${m.id}">${m.machineCode||m.name} — ${m.name}</option>`).join('')}
+          ${deptMachines.map(m=>`<option value="${m.id}" ${guessedMachine && m.id===guessedMachine.id ? 'selected' : ''}>${m.machineCode||m.name} — ${m.name}${guessedMachine && m.id===guessedMachine.id ? ' (suggested)' : ''}</option>`).join('')}
         </select>
       </div>`;
     })
@@ -5303,7 +5324,7 @@ function relinkOrphanedModal(){
   ).join('');
   return `
     <div class="modal-title">Relink Orphaned Entries</div>
-    <p class="helptext" style="margin-bottom:14px;">For each group, pick the current Machine or Shift it actually was — every entry in that group updates together. Groups left as "Leave unlinked" are skipped and can be relinked later.</p>
+    <p class="helptext" style="margin-bottom:14px;">Machine groups are pre-filled with a suggested match based on SPM overlap with each machine's known values — review and correct before applying, since this is a suggestion, not a guarantee. Shift groups need a manual pick. Groups left as "Leave unlinked" are skipped and can be relinked later. Every entry in a group updates together once applied.</p>
     ${machineRows ? `<div class="panel-title" style="margin-bottom:10px;"><span class="bar"></span>Machines</div>${machineRows}` : ''}
     ${shiftRows ? `<div class="panel-title" style="margin-top:16px; margin-bottom:10px;"><span class="bar"></span>Shifts</div>${shiftRows}` : ''}
     <div class="form-actions">
