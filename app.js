@@ -3967,6 +3967,7 @@ const MD_TABS = [
   {key:'users', label:'Supervisor Accounts', category:'shared'},
   {key:'permissionSets', label:'Permission Sets', category:'shared'},
   {key:'auditlog', label:'Audit Log', category:'shared'},
+  {key:'backuphealth', label:'Backup & Health', category:'shared'},
   {key:'rolelabels', label:'Role Labels', category:'shared'},
   {key:'spm', label:'SPM', category:'forging'},
   {key:'reasons', label:'Down Time Reasons', category:'forging'},
@@ -5411,6 +5412,7 @@ function renderMdTab(){
   if(mdTab==='users') return usersEditor();
   if(mdTab==='permissionSets') return permissionSetsEditor();
   if(mdTab==='auditlog') return auditLogEditor();
+  if(mdTab==='backuphealth') return backupHealthEditor();
   if(mdTab==='rolelabels') return roleLabelsEditor();
   return '';
 }
@@ -6215,6 +6217,40 @@ const AUDIT_ACTION_LABELS = {
   permissionset_created: 'Permission Set Created', permissionset_updated: 'Permission Set Updated', permissionset_deleted: 'Permission Set Deleted',
   data_integrity_fix: 'Data Integrity Fix'
 };
+let backupExportStatus = 'idle'; // idle | running | done | error
+let backupExportMessage = '';
+let healthCheckResults = [];
+let healthCheckRunning = false;
+let healthCheckLastRun = null;
+function backupHealthEditor(){
+  return `
+  <div class="panel-title" style="margin-bottom:10px;"><span class="bar"></span>Export Full Backup</div>
+  <p class="helptext" style="margin-bottom:14px;">Your Supabase plan has no automatic backups — this downloads everything (all Master Data, every production entry across Forging/HT/CNC, and the Audit Log) as one JSON file. Run this periodically and keep the file somewhere safe; if data is ever lost again, this file is what makes recovery fast instead of a multi-day reconstruction.</p>
+  <button class="btn" id="exportBackupBtn" type="button" ${backupExportStatus==='running'?'disabled':''}>${backupExportStatus==='running'?'Exporting…':'Export Full Backup'}</button>
+  ${backupExportStatus==='done' ? `<div style="margin-top:10px; font-size:12.5px; color:var(--green);">✓ ${backupExportMessage}</div>` : ''}
+  ${backupExportStatus==='error' ? `<div style="margin-top:10px; font-size:12.5px; color:var(--red);">${backupExportMessage}</div>` : ''}
+
+  <div class="panel-title" style="margin:28px 0 10px;"><span class="bar"></span>Health Check</div>
+  <p class="helptext" style="margin-bottom:14px;">Checks that every table the app depends on is actually readable right now — the same kind of silent access failure (Row Level Security blocking a table) is what caused the September 30 incident. Run this after any Supabase-side change, or periodically as a routine check.</p>
+  <button class="btn" id="runHealthCheckBtn" type="button" ${healthCheckRunning?'disabled':''}>${healthCheckRunning?'Checking…':'Run Health Check'}</button>
+  ${healthCheckLastRun ? `<div style="margin-top:6px; font-size:11.5px; color:var(--ink-dim);">Last run: ${healthCheckLastRun}</div>` : ''}
+  ${healthCheckResults.length>0 ? `
+  <div class="table-scroll" style="margin-top:14px;">
+    <table>
+      <thead><tr><th>Table</th><th>Status</th><th>Rows Readable</th><th>Notes</th></tr></thead>
+      <tbody>
+        ${healthCheckResults.map(r=>`
+        <tr>
+          <td>${r.table}</td>
+          <td><span style="color:${r.ok?'var(--green)':'var(--red)'}; font-weight:700;">${r.ok?'✓ OK':'✕ ISSUE'}</span></td>
+          <td style="font-family:var(--mono);">${r.count}</td>
+          <td style="font-size:12px; color:var(--ink-dim);">${r.note}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>` : ''}
+  `;
+}
 function auditLogEditor(){
   return `
   <p class="helptext" style="margin-bottom:16px;">Tracks who did what across the app — production entries, Master Data changes, user/role management, and Data Integrity fixes. Not loaded automatically; set filters below (all optional) and click Load. Shows the most recent 500 matching events.</p>
@@ -6353,6 +6389,57 @@ function attachAuditLogEvents(){
     render();
   };
 }
+async function attachBackupHealthEvents(){
+  const exportBtn = document.getElementById('exportBackupBtn');
+  if(exportBtn) exportBtn.onclick = async ()=>{
+    backupExportStatus = 'running'; backupExportMessage = ''; render();
+    try {
+      const backup = { exportedAt: new Date().toISOString(), exportedBy: SESSION.name, kvStore: {}, entries: [], htentries: [], cncentries: [], auditLog: [] };
+      Object.keys(STORE_KEYS).forEach(k=>{ if(k!=='entries') backup.kvStore[k] = DB[k]; });
+      backup.entries = await fetchAllRows('prf_entries_v2');
+      backup.htentries = await fetchAllRows('prf_ht_entries');
+      backup.cncentries = await fetchAllRows('prf_cnc_entries');
+      backup.auditLog = await fetchAllRows('prf_audit_log');
+      const json = JSON.stringify(backup, null, 2);
+      const blob = new Blob([json], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `prf-full-backup-${todayStr()}.json`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const totalRecords = Object.values(backup.kvStore).reduce((s,arr)=>s+(Array.isArray(arr)?arr.length:0),0) + backup.entries.length + backup.htentries.length + backup.cncentries.length + backup.auditLog.length;
+      backupExportStatus = 'done';
+      backupExportMessage = `Exported ${totalRecords} total records (${backup.entries.length} Forging + ${backup.htentries.length} HT + ${backup.cncentries.length} CNC entries, plus all Master Data and Audit Log).`;
+      logAudit('backup_exported', null, null, `Full project backup exported — ${totalRecords} total records.`, null);
+    } catch(e) {
+      console.error('backup export failed', e);
+      backupExportStatus = 'error';
+      backupExportMessage = 'Export failed: ' + ((e && e.message) || String(e));
+    }
+    render();
+  };
+  const healthBtn = document.getElementById('runHealthCheckBtn');
+  if(healthBtn) healthBtn.onclick = async ()=>{
+    healthCheckRunning = true; render();
+    const results = [];
+    try{
+      const { data, error } = await supabaseClient.from('kv_store').select('key');
+      if(error) results.push({table:'kv_store (Machines/Items/Shifts/Users/etc.)', ok:false, count:0, note: error.message});
+      else results.push({table:'kv_store (Machines/Items/Shifts/Users/etc.)', ok:(data||[]).length>0, count:(data||[]).length, note: (data||[]).length>0 ? 'Readable' : 'Returned zero rows — check RLS is disabled on this table'});
+    }catch(e){ results.push({table:'kv_store', ok:false, count:0, note:String(e)}); }
+    for(const [table, label] of [['prf_entries_v2','Forging Entries'], ['prf_ht_entries','HT Entries'], ['prf_cnc_entries','CNC Entries'], ['prf_audit_log','Audit Log']]){
+      try{
+        const { count, error } = await supabaseClient.from(table).select('id', {count:'exact', head:true});
+        if(error) results.push({table:label, ok:false, count:0, note: error.message});
+        else results.push({table:label, ok:true, count: count||0, note: (count||0)===0 ? 'Table is readable but empty' : 'Readable'});
+      }catch(e){ results.push({table:label, ok:false, count:0, note:String(e)}); }
+    }
+    healthCheckResults = results;
+    healthCheckRunning = false;
+    healthCheckLastRun = new Date().toLocaleString();
+    render();
+  };
+}
 function wirePermSetModal(id){
   document.getElementById('cancelPermSetModal').onclick = closeModal;
   document.getElementById('permSetForm').onsubmit = async (ev)=>{
@@ -6455,6 +6542,7 @@ function attachMasterDataEvents(){
   if(mdTab==='users') wireUsersCsvImport();
   if(mdTab==='permissionSets') attachPermissionSetsEvents();
   if(mdTab==='auditlog') attachAuditLogEvents();
+  if(mdTab==='backuphealth') attachBackupHealthEvents();
 
   const groupBySelect = document.getElementById('mdGroupBySelect');
   if(groupBySelect) groupBySelect.onchange = ()=>{ mdGroupBy = groupBySelect.value; render(); };
