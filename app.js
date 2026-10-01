@@ -1960,7 +1960,6 @@ function pageDashboard(){
 
   <div class="panel">
     <div class="panel-title"><span class="bar"></span>Key Performance (${dashRangeMode==='mtd'?'Month to Date':dashRangeMode==='ytd'?'Year to Date':'Selected Range'} · ${activePlant?nameOf(DB.locations,activePlant):'Consolidated'})</div>
-    ${SESSION.role==='admin' ? `<div style="font-family:monospace; font-size:11px; color:var(--amber); background:rgba(224,80,59,0.08); padding:8px 12px; border-radius:4px; margin-bottom:10px;">DEBUG (Admin only, temporary): DB.entries total=${DB.entries.length} · scoped=${scoped.length} · filtered (${start} to ${end})=${filtered.length} · activePlant=${activePlant||'(none/consolidated)'} · sample entry dates=${DB.entries.slice(0,5).map(e=>e.date).join(', ')||'(none)'}</div>` : ''}
     <div class="grid-4">
       <div class="kpi-card">
         <div class="gauge-wrap">${gaugeSvg(agg.oeePct, kpiColor(agg.oeePct))}</div>
