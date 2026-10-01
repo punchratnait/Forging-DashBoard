@@ -1394,8 +1394,9 @@ function dateRangeArray(start, end){
    given range, was there at least one production entry? Single-date ranges render as
    the simple tile wall; multi-date ranges render as a full grid (also doubles as the
    "machine-wise, date-wise log" view). */
-function isMachineOnHold(machineId, date){
-  return DB.machineholds.some(h=>h.machineId===machineId && h.date===date);
+function isMachineOnHold(machineId, date, shiftId){
+  const sid = shiftId || '';
+  return DB.machineholds.some(h=>h.machineId===machineId && h.date===date && (h.shiftId||'')===sid);
 }
 function canToggleMachineHold(){
   return SESSION && ['supervisor','head','management','admin'].includes(SESSION.role);
@@ -1449,7 +1450,7 @@ function machineStatusGrid(startDate, endDate, dept){
         if(deptShifts.length===0){ if(s.status==='pending') pendingSlots++; if(s.status==='hold') holdSlots++; return; }
         s.shiftStatuses.forEach(ss=>{
           if(ss.entered) return;
-          const onHold = isMachineOnHold(m.id, s.date);
+          const onHold = isMachineOnHold(m.id, s.date, ss.shiftId);
           if(onHold) holdSlots++; else if(s.date >= RECOVERY_CUTOFF_DATE) pendingSlots++;
         });
       });
@@ -1523,10 +1524,10 @@ function renderMachineStatusSection(dept){
         return `<div class="machine-status-tile ${s}" ${toggleAttr} title="${m.fullLabel} — ${statusLabel(s)} (${d})${hint}">${m.code}</div>`;
       }
       const segments = shiftStatuses.map(ss=>{
-        const onHold = !ss.entered && isMachineOnHold(m.id, d);
+        const onHold = !ss.entered && isMachineOnHold(m.id, d, ss.shiftId);
         const s = ss.entered ? 'entered' : (onHold ? 'hold' : (d < RECOVERY_CUTOFF_DATE ? 'orphaned' : 'pending'));
         const clickable = canToggle && s !== 'entered' && s !== 'orphaned';
-        const toggleAttr = clickable ? `data-hold-machine="${m.id}" data-hold-date="${d}"` : '';
+        const toggleAttr = clickable ? `data-hold-machine="${m.id}" data-hold-date="${d}" data-hold-shift="${ss.shiftId}"` : '';
         const hint = s==='entered' ? '' : (canToggle ? ' — click to ' + (s==='hold'?'un-mark':'mark as No Planning') : '');
         return `<span class="shift-segment ${s}" ${toggleAttr} title="${m.fullLabel} — ${ss.shiftName} — ${statusLabel(s)} (${d})${hint}">${shiftShortLabel(ss.shiftName)}</span>`;
       }).join('');
@@ -1554,10 +1555,10 @@ function renderMachineStatusSection(dept){
                     return `<td style="text-align:center;"><span class="grid-dot ${s.status}" ${toggleAttr} title="${m.fullLabel} — ${statusLabel(s.status)} (${s.date})${hint}"></span></td>`;
                   }
                   const dots = s.shiftStatuses.map(ss=>{
-                    const onHold = !ss.entered && isMachineOnHold(m.id, s.date);
+                    const onHold = !ss.entered && isMachineOnHold(m.id, s.date, ss.shiftId);
                     const st = ss.entered ? 'entered' : (onHold ? 'hold' : (s.date < RECOVERY_CUTOFF_DATE ? 'orphaned' : 'pending'));
                     const clickable = canToggle && st !== 'entered' && st !== 'orphaned';
-                    const toggleAttr = clickable ? `data-hold-machine="${m.id}" data-hold-date="${s.date}"` : '';
+                    const toggleAttr = clickable ? `data-hold-machine="${m.id}" data-hold-date="${s.date}" data-hold-shift="${ss.shiftId}"` : '';
                     const hint = st==='entered' ? '' : (canToggle ? ' — click to ' + (st==='hold'?'un-mark':'mark as No Planning') : '');
                     return `<span class="grid-dot ${st}" ${toggleAttr} title="${m.fullLabel} — ${ss.shiftName} — ${statusLabel(st)} (${s.date})${hint}" style="margin:0 1px;"></span>`;
                   }).join('');
@@ -2142,12 +2143,13 @@ function attachMachineStatusEvents(){
       if(!canToggleMachineHold()) return;
       const machineId = el.dataset.holdMachine;
       const date = el.dataset.holdDate;
-      const existing = DB.machineholds.find(h=>h.machineId===machineId && h.date===date);
+      const shiftId = el.dataset.holdShift || '';
+      const existing = DB.machineholds.find(h=>h.machineId===machineId && h.date===date && (h.shiftId||'')===shiftId);
       if(existing){
         DB.machineholds = DB.machineholds.filter(h=>h.id!==existing.id);
       } else {
         const machine = byId(DB.machines, machineId);
-        DB.machineholds.push({ id: uid('hold'), machineId, date, locationId: machine ? machine.location : '' });
+        DB.machineholds.push({ id: uid('hold'), machineId, date, shiftId, locationId: machine ? machine.location : '' });
       }
       await save('machineholds');
       render();
