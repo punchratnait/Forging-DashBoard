@@ -232,14 +232,18 @@ async function fetchAllRows(tableName){
   let allRows = [];
   let from = 0;
   while(true){
-    const { data, error } = await supabaseClient.from(tableName).select('*').range(from, from + pageSize - 1);
+    // Without an explicit ORDER BY, row order between separate page requests isn't
+    // guaranteed (it can shift after updates), so pages could skip or repeat rows.
+    // Ordering by the primary key makes every page request see the same sequence.
+    const { data, error } = await supabaseClient.from(tableName).select('*').order('id', {ascending:true}).range(from, from + pageSize - 1);
     if(error){ throw error; }
     const rows = data || [];
     allRows = allRows.concat(rows);
     if(rows.length < pageSize) break; // short page means we've reached the end
     from += pageSize;
   }
-  return allRows;
+  const seen = new Set();
+  return allRows.filter(r=>{ if(r.id===undefined) return true; if(seen.has(r.id)) return false; seen.add(r.id); return true; });
 }
 /* Audit Log — fire-and-forget: logging a save must never block or fail the save
    itself. Called after an action already succeeded, so a logging failure here just
@@ -6429,13 +6433,29 @@ async function attachBackupHealthEvents(){
       if(error) results.push({table:'kv_store (Machines/Items/Shifts/Users/etc.)', ok:false, count:0, note: error.message});
       else results.push({table:'kv_store (Machines/Items/Shifts/Users/etc.)', ok:(data||[]).length>0, count:(data||[]).length, note: (data||[]).length>0 ? 'Readable' : 'Returned zero rows — check RLS is disabled on this table'});
     }catch(e){ results.push({table:'kv_store', ok:false, count:0, note:String(e)}); }
-    for(const [table, label] of [['prf_entries_v2','Forging Entries'], ['prf_ht_entries','HT Entries'], ['prf_cnc_entries','CNC Entries'], ['prf_audit_log','Audit Log']]){
+    const loadedCounts = { prf_entries_v2: DB.entries.length, prf_ht_entries: DB.htentries.length, prf_cnc_entries: DB.cncentries.length };
+    for(const [table, label] of [['prf_entries_v2','Forging Entries'], ['prf_ht_entries','HT Entries'], ['prf_cnc_entries','CNC Entries']]){
       try{
         const { count, error } = await supabaseClient.from(table).select('id', {count:'exact', head:true});
-        if(error) results.push({table:label, ok:false, count:0, note: error.message});
-        else results.push({table:label, ok:true, count: count||0, note: (count||0)===0 ? 'Table is readable but empty' : 'Readable'});
+        if(error){ results.push({table:label, ok:false, count:0, note: error.message}); continue; }
+        const tableCount = count||0, loaded = loadedCounts[table];
+        if(tableCount !== loaded) results.push({table:label, ok:false, count:tableCount, note:`Table has ${tableCount} rows but this page only loaded ${loaded} — rows are being lost on load. Refresh and re-run; if it persists, report these two numbers.`});
+        else results.push({table:label, ok:true, count:tableCount, note: tableCount===0 ? 'Table is readable but empty' : `Readable — all ${loaded} rows loaded in the app`});
       }catch(e){ results.push({table:label, ok:false, count:0, note:String(e)}); }
     }
+    // Audit Log: a blocked table can still report a count of 0 with no error, so test
+    // an actual write and read-back rather than trusting the count.
+    try{
+      const testId = uid('audittest');
+      const { error: insErr } = await supabaseClient.from('prf_audit_log').insert({ id:testId, action:'health_check', description:'Health check write test' });
+      if(insErr) results.push({table:'Audit Log', ok:false, count:0, note:`Cannot write: ${insErr.message}. RLS is likely still enabled on prf_audit_log — disable it in Supabase.`});
+      else{
+        const { data: back, error: selErr } = await supabaseClient.from('prf_audit_log').select('id').eq('id', testId);
+        const readable = !selErr && back && back.length===1;
+        await supabaseClient.from('prf_audit_log').delete().eq('id', testId);
+        results.push(readable ? {table:'Audit Log', ok:true, count:0, note:'Write and read-back both work'} : {table:'Audit Log', ok:false, count:0, note:'Writes succeed but rows cannot be read back — RLS is blocking reads on prf_audit_log.'});
+      }
+    }catch(e){ results.push({table:'Audit Log', ok:false, count:0, note:String(e)}); }
     healthCheckResults = results;
     healthCheckRunning = false;
     healthCheckLastRun = new Date().toLocaleString();
