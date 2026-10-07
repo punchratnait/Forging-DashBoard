@@ -81,6 +81,33 @@ function effectiveLocationId(){
   return SESSION.locationId || '';
 }
 
+/* Custom roles: how much of Master Data a Permission Set grants.
+     ''      = none
+     'entry' = add & edit records, never delete (and no admin/commercial tabs)
+     'full'  = add, edit & delete (still no admin-only tabs)
+   Sets saved before this existed only stored an on/off masterData flag, which is
+   treated as 'full' so nothing already configured loses access. */
+function permMasterDataMode(ps){
+  if(!ps) return '';
+  if(ps.masterDataMode==='entry' || ps.masterDataMode==='full') return ps.masterDataMode;
+  return ps.masterData===true ? 'full' : '';
+}
+// null for the fixed roles (admin/marketing/etc.), otherwise the custom role's level.
+function sessionMasterDataMode(){
+  if(!SESSION || SESSION.role!=='custom') return null;
+  return permMasterDataMode(byId(DB.permissionSets, SESSION.permissionSetId));
+}
+// Fixed roles keep their existing behaviour; only an "add & edit" Custom account is blocked.
+function canDeleteMasterData(){
+  const m = sessionMasterDataMode();
+  return m===null || m==='full';
+}
+function canOpenMasterDataPage(){
+  if(!SESSION) return false;
+  if(SESSION.role==='admin' || SESSION.role==='marketing') return true;
+  const m = sessionMasterDataMode();
+  return m==='entry' || m==='full';
+}
 function pageAllowedRoutes(){
   const role = SESSION && SESSION.role;
   if(role === 'custom'){
@@ -98,7 +125,7 @@ function pageAllowedRoutes(){
     if(ps.heattreatmentEntry) routes.push('htnewentry');
     if(ps.cncView) routes.push('cnclog');
     if(ps.cncEntry) routes.push('cncnewentry');
-    if(ps.masterData) routes.push('masterdata');
+    if(permMasterDataMode(ps)) routes.push('masterdata');
     if(ps.l1) routes.push('l1');
     return routes;
   }
@@ -1097,7 +1124,7 @@ function renderPage(){
   if(ROUTE==='newentry') return pageNewEntry();
   if(ROUTE==='quickdowntime') return pageQuickDowntime();
   if(ROUTE==='entrylog') return pageEntryLog();
-  if(ROUTE==='masterdata' && (SESSION.role==='admin' || SESSION.role==='marketing')) return pageMasterData();
+  if(ROUTE==='masterdata' && canOpenMasterDataPage()) return pageMasterData();
   if(ROUTE==='reports' && (SESSION.role==='admin' || SESSION.role==='head' || SESSION.role==='management')) return pageReports();
   if(ROUTE==='spm' && (SESSION.role==='admin' || SESSION.role==='head' || SESSION.role==='supervisor')) return pageSpmOnly();
   if(ROUTE==='htnewentry') return pageHtNewEntry();
@@ -3994,8 +4021,19 @@ const MD_CATEGORIES = [
 ];
 /* Marketing role only manages Invoices and Customer Complaints — everything else in
    Master Data (production config, Danger Zone, Accounts) stays Admin-only. */
+// Tabs that configure the system itself — never shown to Custom accounts, whatever
+// their Master Data level, since editing Permission Sets or accounts would let them
+// grant themselves more access.
+const MD_ADMIN_ONLY_TABS = ['users','permissionSets','auditlog','backuphealth','rolelabels'];
 function mdTabsForRole(){
   if(SESSION && SESSION.role === 'marketing') return MD_TABS.filter(t=>t.key==='invoices' || t.key==='complaints');
+  const customMode = sessionMasterDataMode();
+  if(SESSION && SESSION.role==='custom' && !customMode) return []; // no Master Data access: deny by default
+  if(customMode){
+    let tabs = MD_TABS.filter(t=>!MD_ADMIN_ONLY_TABS.includes(t.key));
+    if(customMode==='entry') tabs = tabs.filter(t=>t.category!=='commercial');
+    return tabs;
+  }
   return MD_TABS;
 }
 let mdCategory = '';
@@ -5506,7 +5544,7 @@ function htFurnaceItemEditor(){
           <tr>
             <td>${machineCodeOf(s.furnaceId)}</td>
             <td>${itemCodeOf(s.itemId)}</td>
-            <td><button class="icon-btn danger" data-mddel="htfurnaceitems:${s.id}" title="Delete">✕</button></td>
+            <td>${canDeleteMasterData() ? `<button class="icon-btn danger" data-mddel="htfurnaceitems:${s.id}" title="Delete">✕</button>` : ''}</td>
           </tr>`;
   const groupOptions = [{key:'furnace',label:'Furnace Code'}];
   const groupLabelFn = (s)=>machineCodeOf(s.furnaceId);
@@ -5921,7 +5959,7 @@ function simpleListEditor(dbKey, fields){
         <td>
           <div class="row-actions">
             <button class="icon-btn" data-mdedit="${dbKey}:${item.id}" title="Edit">✎</button>
-            <button class="icon-btn danger" data-mddel="${dbKey}:${item.id}" title="Delete">✕</button>
+            ${canDeleteMasterData() ? `<button class="icon-btn danger" data-mddel="${dbKey}:${item.id}" title="Delete">✕</button>` : ''}
           </div>
         </td>
       </tr>`;
@@ -6078,7 +6116,7 @@ function spmEditor(){
             <td>${machineCodeOf(s.machineId)}</td>
             <td>${itemCodeOf(s.itemId)}</td>
             <td style="font-family:var(--mono);">${s.spm}</td>
-            <td><button class="icon-btn danger" data-mddel="spm:${s.id}" title="Delete">✕</button></td>
+            <td>${canDeleteMasterData() ? `<button class="icon-btn danger" data-mddel="spm:${s.id}" title="Delete">✕</button>` : ''}</td>
           </tr>`;
   const groupOptions = [{key:'machine',label:'Machine Code'},{key:'item',label:'Item Code'}];
   const groupLabelFn = mdGroupBy==='machine' ? (s)=>machineCodeOf(s.machineId) : (s)=>itemCodeOf(s.itemId);
@@ -6193,7 +6231,7 @@ const PERM_DEPTS = [
   {key:'cnc', label:'CNC'}
 ];
 function blankPermissionSet(){
-  return { id: uid('permset'), name:'', forgingView:false, forgingEntry:false, heattreatmentView:false, heattreatmentEntry:false, cncView:false, cncEntry:false, dashboard:false, l1:false, masterData:false, spm:false };
+  return { id: uid('permset'), name:'', forgingView:false, forgingEntry:false, heattreatmentView:false, heattreatmentEntry:false, cncView:false, cncEntry:false, dashboard:false, l1:false, masterData:false, masterDataMode:'', spm:false };
 }
 function permissionSummary(p){
   const parts = [];
@@ -6203,7 +6241,7 @@ function permissionSummary(p){
   });
   if(p.dashboard) parts.push('Dashboard');
   if(p.l1) parts.push('Executive Dashboard');
-  if(p.masterData) parts.push('Master Data');
+  { const m = permMasterDataMode(p); if(m==='entry') parts.push('Master Data (add & edit only)'); else if(m==='full') parts.push('Master Data (full, can delete)'); }
   if(p.spm) parts.push('SPM');
   return parts.length ? parts.join(' · ') : 'No rights granted yet';
 }
@@ -6343,9 +6381,15 @@ function permissionSetModal(id){
       <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:10px;">
         <input type="checkbox" id="ps_l1" ${p.l1?'checked':''} style="width:auto;"> <span>Executive Dashboard (L1) Access</span>
       </label>
-      <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:10px;">
-        <input type="checkbox" id="ps_masterdata" ${p.masterData?'checked':''} style="width:auto;"> <span>Master Data Access</span>
-      </label>
+      <div class="field" style="margin-bottom:12px;">
+        <label>Master Data Access</label>
+        <select id="ps_masterdatamode">
+          <option value="" ${permMasterDataMode(p)===''?'selected':''}>None</option>
+          <option value="entry" ${permMasterDataMode(p)==='entry'?'selected':''}>Add &amp; edit only — cannot delete anything</option>
+          <option value="full" ${permMasterDataMode(p)==='full'?'selected':''}>Full — add, edit and delete</option>
+        </select>
+        <div class="helptext">Covers Items, SPM, Machines, Shifts, Reasons and the other data lists. Accounts, Permission Sets, Audit Log, Backup and the Data Integrity tools stay Admin-only at every level. "Add &amp; edit only" also hides Invoices and Complaints.</div>
+      </div>
       <label style="display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:14px;">
         <input type="checkbox" id="ps_spm" ${p.spm?'checked':''} style="width:auto;"> <span>SPM Access (Forging)</span>
       </label>
@@ -6476,7 +6520,8 @@ function wirePermSetModal(id){
     });
     rec.dashboard = document.getElementById('ps_dashboard').checked;
     rec.l1 = document.getElementById('ps_l1').checked;
-    rec.masterData = document.getElementById('ps_masterdata').checked;
+    rec.masterDataMode = document.getElementById('ps_masterdatamode').value;
+    rec.masterData = rec.masterDataMode !== ''; // kept in step for older code that reads the on/off flag
     rec.spm = document.getElementById('ps_spm').checked;
     if(!id) DB.permissionSets.push(rec);
     closeModal();
@@ -6694,6 +6739,7 @@ function attachMasterDataEvents(){
   document.querySelectorAll('[data-mddel]').forEach(btn=>{
     btn.onclick = async ()=>{
       const [key, id] = btn.dataset.mddel.split(':');
+      if(!canDeleteMasterData()){ alert('Your account can add and edit Master Data but cannot delete it. Please ask an Admin to remove records.'); return; }
       if(!confirm('Delete this record?')) return;
       const deletedRec = byId(DB[key], id);
       const fields = fieldsMap[key];
