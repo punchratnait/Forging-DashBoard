@@ -1045,6 +1045,74 @@ function navItems(){
   return pageAllowedRoutes().map(key=>({key, label:labels[key]}));
 }
 
+function escapeHtml(v){
+  return String(v==null ? '' : v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+/* ---- signed-in user bar (top right on desktop, avatar menu in the phone top bar) ---- */
+function sessionInitials(){
+  const parts = String((SESSION && SESSION.name) || '').trim().split(/\s+/).filter(Boolean);
+  if(parts.length>=2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  if(parts.length===1) return parts[0].slice(0,2).toUpperCase();
+  return '?';
+}
+function sessionRoleDisplay(){
+  if(SESSION.role==='custom'){
+    const ps = byId(DB.permissionSets, SESSION.permissionSetId);
+    return ps && ps.name ? ps.name : 'Custom';
+  }
+  if(SESSION.role==='admin' || SESSION.role==='marketing') return ROLE_DEFAULT_LABELS[SESSION.role] || SESSION.role;
+  return roleLabel(SESSION.department, SESSION.role);
+}
+function sessionDepartmentDisplay(){
+  if(SESSION.role==='admin' || SESSION.role==='marketing' || SESSION.role==='custom') return 'All departments';
+  return nameOf(DEPARTMENT_OPTIONS, SESSION.department);
+}
+function sessionLocationDisplay(){
+  const loc = effectiveLocationId();
+  return loc ? nameOf(DB.locations, loc) : 'All locations';
+}
+function userMenuHtml(menuId){
+  return `
+    <div class="user-menu" id="${menuId}" role="menu">
+      <div class="user-menu-name">${escapeHtml(SESSION.name)}</div>
+      <div class="user-menu-role">${escapeHtml(sessionRoleDisplay())}</div>
+      <div class="user-menu-row"><span>User ID</span><span class="mono">${escapeHtml(SESSION.id)}</span></div>
+      <div class="user-menu-row"><span>Department</span><span>${escapeHtml(sessionDepartmentDisplay())}</span></div>
+      <div class="user-menu-row" style="border-bottom:none;"><span>Location</span><span>📍 ${escapeHtml(sessionLocationDisplay())}</span></div>
+      <button class="btn btn-ghost btn-sm user-menu-signout" type="button" data-signout>Sign Out</button>
+    </div>`;
+}
+function doSignOut(){
+  if(inactivityTimer) clearTimeout(inactivityTimer);
+  try{ sessionStorage.removeItem('prf_session_userid'); }catch(e){}
+  SESSION=null; LOGIN_MODE='login'; draftPromptDismissed=false; entryDraft=null; editingEntryId=null;
+  render();
+}
+function closeUserMenus(){
+  document.querySelectorAll('.user-menu.open').forEach(m=>m.classList.remove('open'));
+  document.querySelectorAll('[data-usermenu-toggle]').forEach(b=>b.setAttribute('aria-expanded','false'));
+}
+let userMenuDocWired = false;
+function wireUserMenus(){
+  document.querySelectorAll('[data-signout]').forEach(btn=>{ btn.onclick = doSignOut; });
+  document.querySelectorAll('[data-usermenu-toggle]').forEach(btn=>{
+    btn.onclick = (ev)=>{
+      ev.stopPropagation();
+      const menu = document.getElementById(btn.dataset.usermenuToggle);
+      if(!menu) return;
+      const willOpen = !menu.classList.contains('open');
+      closeUserMenus();
+      if(willOpen){ menu.classList.add('open'); btn.setAttribute('aria-expanded','true'); }
+    };
+  });
+  // Document-level listeners are added once only — the shell re-renders constantly and
+  // adding them every time would stack up duplicates.
+  if(!userMenuDocWired){
+    userMenuDocWired = true;
+    document.addEventListener('click', (ev)=>{ if(!ev.target.closest('.user-menu') && !ev.target.closest('[data-usermenu-toggle]')) closeUserMenus(); });
+    document.addEventListener('keydown', (ev)=>{ if(ev.key==='Escape') closeUserMenus(); });
+  }
+}
 function renderShell(){
   const items = navItems();
   const viewLabel = PAGE_VIEW==='entry' ? 'ENTRY TERMINAL' : PAGE_VIEW==='dashboard' ? 'MANAGEMENT VIEW' : PAGE_VIEW==='l1' ? 'EXECUTIVE VIEW' : PAGE_VIEW==='supervisor' ? 'SUPERVISOR VIEW' : PAGE_VIEW==='heattreatment' ? 'HEAT TREATMENT' : PAGE_VIEW==='htentry' ? 'HT ENTRY TERMINAL' : PAGE_VIEW==='cnc' ? 'CNC DASHBOARD' : PAGE_VIEW==='cncentry' ? 'CNC ENTRY TERMINAL' : 'ADMIN CONSOLE';
@@ -1073,6 +1141,10 @@ function renderShell(){
     <div class="mobile-topbar">
       <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Menu">☰</button>
       <span class="mobile-topbar-title">${labels[ROUTE] || 'PRF'}</span>
+      <div class="user-anchor mobile-anchor">
+        <button class="avatar-btn" type="button" data-usermenu-toggle="userMenuMob" aria-label="Account menu" aria-expanded="false"><span class="user-avatar">${escapeHtml(sessionInitials())}</span></button>
+        ${userMenuHtml('userMenuMob')}
+      </div>
     </div>
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     <div class="sidebar" id="sidebarPanel">
@@ -1085,18 +1157,30 @@ function renderShell(){
       </div>
       <nav>${nav}${analyticsLink}${downtimeLink}</nav>
       <div class="side-foot">
-        <div class="who">${SESSION.name}</div>
+        <div class="who">${escapeHtml(SESSION.name)}</div>
         <div class="who-role">${SESSION.role}</div>
         ${effectiveLocationId() ? `<div style="font-size:10.5px;color:var(--ink-dim);margin-top:2px;">📍 ${nameOf(DB.locations,effectiveLocationId())}</div>` : ''}
-        <button class="btn btn-ghost btn-sm logout-btn" id="logoutBtn">Sign Out</button>
+        <button class="btn btn-ghost btn-sm logout-btn" id="logoutBtn" data-signout>Sign Out</button>
       </div>
     </div>
-    <div class="main" id="mainArea">${renderPage()}</div>
+    <div class="content-col">
+      <div class="userbar">
+        <div class="user-anchor">
+          <button class="user-chip" type="button" data-usermenu-toggle="userMenuDesk" aria-label="Account menu" aria-expanded="false">
+            <span class="user-chip-text"><b>${escapeHtml(SESSION.name)}</b><span>${escapeHtml(sessionRoleDisplay())}</span></span>
+            <span class="user-avatar">${escapeHtml(sessionInitials())}</span>
+            <span class="user-chip-caret">▾</span>
+          </button>
+          ${userMenuHtml('userMenuDesk')}
+        </div>
+      </div>
+      <div class="main" id="mainArea">${renderPage()}</div>
+    </div>
   </div>`;
 }
 
 function attachShellEvents(){
-  document.getElementById('logoutBtn').onclick = ()=>{ if(inactivityTimer) clearTimeout(inactivityTimer); try{ sessionStorage.removeItem('prf_session_userid'); }catch(e){} SESSION=null; LOGIN_MODE='login'; draftPromptDismissed=false; entryDraft=null; editingEntryId=null; render(); };
+  wireUserMenus();
   const sidebarPanel = document.getElementById('sidebarPanel');
   const sidebarOverlay = document.getElementById('sidebarOverlay');
   const closeDrawer = ()=>{ sidebarPanel.classList.remove('open'); sidebarOverlay.classList.remove('open'); };

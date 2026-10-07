@@ -219,6 +219,47 @@
   }
   @media (min-width:769px){ .mobile-menu-btn{ display:none; } }
 
+  /* ---------- Signed-in user bar (desktop) + account menu ---------- */
+  .content-col{ flex:1; min-width:0; display:flex; flex-direction:column; }
+  .userbar{
+    position:sticky; top:0; z-index:30; display:flex; justify-content:flex-end; align-items:center;
+    padding:8px 34px; background: var(--panel); border-bottom:1px solid var(--line);
+  }
+  .user-chip{
+    display:flex; align-items:center; background:none; border:1px solid transparent; border-radius:6px;
+    padding:4px 8px; cursor:pointer; color: var(--ink); font:inherit;
+  }
+  .user-chip:hover, .user-chip[aria-expanded="true"]{ border-color: var(--line); background: var(--panel-2); }
+  .user-chip-text{ text-align:right; line-height:1.25; margin-right:10px; }
+  .user-chip-text b{ display:block; font-size:13px; font-weight:600; }
+  .user-chip-text span{ font-family: var(--mono); font-size:10px; letter-spacing:1px; color: var(--amber); text-transform:uppercase; }
+  .user-chip-caret{ margin-left:8px; color: var(--ink-dim); font-size:11px; }
+  .user-avatar{
+    width:34px; height:34px; border-radius:50%; flex-shrink:0; display:inline-flex; align-items:center; justify-content:center;
+    background: rgba(var(--amber-rgb),0.16); border:1px solid var(--amber); color: var(--amber);
+    font-family: var(--mono); font-size:12px; font-weight:700;
+  }
+  .user-anchor{ position:relative; }
+  .mobile-anchor{ margin-left:auto; }
+  .avatar-btn{ background:none; border:none; padding:2px; cursor:pointer; display:block; }
+  .user-menu{
+    display:none; position:absolute; right:0; top:100%; margin-top:6px; width:260px; z-index:40;
+    background: var(--panel-2); border:1px solid var(--line); border-radius:6px; padding:14px;
+    box-shadow:0 10px 30px rgba(0,0,0,0.45);
+  }
+  .user-menu.open{ display:block; }
+  .user-menu-name{ font-size:13.5px; font-weight:600; color: var(--ink); overflow-wrap:anywhere; }
+  .user-menu-role{ font-family: var(--mono); font-size:10px; letter-spacing:1px; color: var(--amber); text-transform:uppercase; margin:2px 0 10px; }
+  .user-menu-row{ display:flex; justify-content:space-between; font-size:12px; padding:5px 0; border-bottom:1px solid var(--line); }
+  .user-menu-row span:first-child{ color: var(--ink-dim); margin-right:12px; }
+  .user-menu-row span:last-child{ text-align:right; overflow-wrap:anywhere; }
+  .user-menu-signout{ width:100%; margin-top:12px; }
+  @media (min-width:769px){ .mobile-anchor{ display:none; } }
+  @media (max-width:768px){
+    .userbar{ display:none; }
+    .mobile-anchor .user-menu{ width:min(260px, calc(100vw - 24px)); }
+  }
+
   .panel{
     background: var(--panel); border:1px solid var(--line); border-radius: var(--card-radius);
     box-shadow: var(--shadow);
@@ -262,6 +303,7 @@
   .machine-status-tile.entered{ background:rgba(70,184,118,0.14); border:1px solid var(--green); color:var(--green); }
   .machine-status-tile.pending{ background:rgba(224,80,59,0.14); border:1px solid var(--red); color:var(--red); cursor:pointer; }
   .machine-status-tile.hold{ background:rgba(var(--amber-rgb),0.14); border:1px solid var(--amber); color:var(--amber); cursor:pointer; }
+  .machine-status-tile.orphaned{ background:rgba(148,163,184,0.12); border:1px dashed var(--ink-dim); color:var(--ink-dim); }
   .machine-shift-tile{
     display:flex; flex-direction:column; align-items:center; gap:4px; min-width:60px;
   }
@@ -274,6 +316,7 @@
   .shift-segment.entered{ background:rgba(70,184,118,0.18); border:1px solid var(--green); color:var(--green); }
   .shift-segment.pending{ background:rgba(224,80,59,0.18); border:1px solid var(--red); color:var(--red); cursor:pointer; }
   .shift-segment.hold{ background:rgba(var(--amber-rgb),0.18); border:1px solid var(--amber); color:var(--amber); cursor:pointer; }
+  .shift-segment.orphaned{ background:rgba(148,163,184,0.14); border:1px dashed var(--ink-dim); color:var(--ink-dim); }
   .pending-badge{
     display:inline-block; background:var(--red); color:#fff; border-radius:10px; font-size:10.5px;
     padding:1px 7px; margin-left:6px; font-weight:700; vertical-align:middle;
@@ -282,6 +325,7 @@
   .grid-dot.entered{ background:var(--green); }
   .grid-dot.pending{ background:var(--red); cursor:pointer; }
   .grid-dot.hold{ background:var(--amber); cursor:pointer; }
+  .grid-dot.orphaned{ background:var(--ink-dim); opacity:0.5; }
 
   .dt-details{ max-width:220px; }
   .dt-details summary{
